@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 interface Irouter {
   function WETH() external pure returns (address);
   function getAmountsOut(uint amountIn, address[] memory path) external view returns (uint[] memory amounts);
+  function getAmountsIn(uint amountOut, address[] memory path) external view returns (uint[] memory amounts);
   function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts);
-  function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts);
+  function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts);// this may be nedded at some point
 }
 
 contract TestingHelper {
@@ -30,5 +31,12 @@ contract TestingHelper {
 
   function getTokenBalance(address token) public view returns (uint) {
     return IERC20(token).balanceOf(msg.sender);
+  }
+
+  function getAmountIn(address input, address output, uint amountRequired) public view returns (uint) {
+    address[] memory path = new address[](2);
+    path[0] = input;
+    path[1] = output;
+    return router.getAmountsIn(amountRequired, path)[0];
   }
 }

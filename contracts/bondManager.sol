@@ -4,13 +4,16 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
+import "./borrowerNFT.sol";
+import './lenderNFT.sol';
 
 struct ethBondRequest {
   address borrower;
   uint256 ETHAmount;
   address token;
   uint256 tokenAmount;
+  uint256 durationInHours;
   uint256 intrestYearly;
 }
 
@@ -20,14 +23,20 @@ struct tokenBondRequest {
   uint256 collatralAmount;
   address borrowingtoken;
   uint256 borrowingAmount;
+  uint256 durationInHours;
   uint256 intrestYearly;
 }
 
+struct bondRequests {
+  ethBondRequest[] ethRequests;
+  tokenBondRequest[] tokenRequests;
+}
+
 contract BondManager is ReentrancyGuard {
-  mapping(address => ethBondRequest) public ethBondRequests;
-  mapping(address => tokenBondRequest) public tokenBondRequests;
-  address[] ethBondRequestAddresses;
-  address[] tokenBondRequestAddresses;
+  ethBondRequest[] ethBondRequests;
+  tokenBondRequest[] tokenBondRequests;
+  mapping(address => Borrower) public borrowerContracts;
+  mapping(address => Lender) public lenderContracts;
 
   address[] whitelistedTokens;
 
@@ -59,6 +68,7 @@ contract BondManager is ReentrancyGuard {
     require(to != payable(address(0)), 'cant send to the 0 address');
     require(value != 0, 'can not send nothing');
     (bool sent, bytes memory data) = to.call{value: value}("");
+    data = data; // this is just here to tell solc that it is being used
     require(sent, "Failed to send Ether");
   }
   
@@ -69,10 +79,11 @@ contract BondManager is ReentrancyGuard {
     require(termInHours > 24, 'bond length is too short');
     require(intrestYearly > 2 && intrestYearly < 15, 'intrest is not in this range: (2 to 15)%');
     
-    ethBondRequest memory newRequest = ethBondRequest(msg.sender, msg.value, borrowingToken, borrowingAmount, intrestYearly);
-    ethBondRequests[msg.sender] = newRequest;
-    ethBondRequestAddresses.push(msg.sender);
+    ethBondRequest memory newRequest = ethBondRequest(msg.sender, msg.value, borrowingToken, borrowingAmount, termInHours, intrestYearly);
+    ethBondRequests.push(newRequest);
     
+    console.log('%s %s', msg.sender, ethBondRequests[0].borrower);
+
     return true;
   }
 
@@ -87,45 +98,116 @@ contract BondManager is ReentrancyGuard {
     uint allowance = collatralTokenContract.allowance(msg.sender, address(this));
     require(allowance >= collatralAmount, 'allowance is not high ehough');
 
-    tokenBondRequest memory newRequest = tokenBondRequest(msg.sender, collatralToken, collatralAmount, borrowingToken, borrowingAmount, intrestYearly);
-    tokenBondRequests[msg.sender] = newRequest;
-    tokenBondRequestAddresses.push(msg.sender);   
+    tokenBondRequest memory newRequest = tokenBondRequest(msg.sender, collatralToken, collatralAmount, borrowingToken, borrowingAmount, termInHours, intrestYearly);
+    tokenBondRequests.push(newRequest);   
 
     bool status = collatralTokenContract.transferFrom(msg.sender, address(this), collatralAmount);
     require(status, 'transferFrom failed');
     return true;
   }
 
-  function cancelETHToTokenBondRequest() public payable returns (bool) {
+  function indexOfETHBondRequest(ethBondRequest memory request) internal view returns (int) {
     int index = -1;
-    for (int i = 0; i < int(ethBondRequestAddresses.length); i++) {
-      if (ethBondRequestAddresses[uint(i)] == msg.sender) {
-        index = i;
+    for (uint i = 0; i < ethBondRequests.length; i++) {
+      bool isMatching = (
+        (ethBondRequests[i].borrower == request.borrower) &&
+        (ethBondRequests[i].ETHAmount == request.ETHAmount) &&
+        (ethBondRequests[i].token == request.token) &&
+        (ethBondRequests[i].tokenAmount == request.tokenAmount) &&
+        (ethBondRequests[i].durationInHours == request.durationInHours) &&
+        (ethBondRequests[i].intrestYearly == request.intrestYearly)
+      );
+
+      if (isMatching) {
+        index = int(i);
       }
     }
+    return index;
+  }
+
+  function indexOfTokenBondRequest(tokenBondRequest memory request) internal view returns (int) {
+    int index = -1;
+
+    for (uint i = 0; i < tokenBondRequests.length; i++) {
+      bool isMatching = (
+        (tokenBondRequests[i].borrower == request.borrower) &&
+        (tokenBondRequests[i].collatralToken == request.collatralToken) &&
+        (tokenBondRequests[i].collatralAmount == request.collatralAmount) &&
+        (tokenBondRequests[i].borrowingtoken == request.borrowingtoken) &&
+        (tokenBondRequests[i].durationInHours == request.durationInHours) &&
+        (tokenBondRequests[i].intrestYearly == request.intrestYearly)
+      );
+      if (isMatching) {
+        index = int(i);
+      }
+    }
+    return index;
+  }
+
+  function cancelETHToTokenBondRequest(ethBondRequest memory request) public payable returns (bool) {
+    int index = indexOfETHBondRequest(request);
     require(index != -1, 'no bond request for this address');
-    uint amount = ethBondRequests[msg.sender].ETHAmount;
-    delete ethBondRequests[msg.sender];
-    delete ethBondRequestAddresses[uint(index)];
-    sendViaCall(payable(msg.sender), amount);
+    console.log('%s %s',ethBondRequests[uint(index)].borrower, msg.sender);
+    require(ethBondRequests[uint(index)].borrower == msg.sender, 'not the borrower');
+    uint amount = ethBondRequests[uint(index)].ETHAmount;
+    delete ethBondRequests[uint(index)];
+    sendViaCall(payable(request.borrower), amount);
     return true;
   }
 
-  function canceltokenToTokenBondRequest() public payable returns (bool) {
-    int index = -1;
-    for (int i = 0; i < int(tokenBondRequestAddresses.length); i++) {
-      if (tokenBondRequestAddresses[uint(i)] == msg.sender) {
-        index = i;
-      }
-    }
+  function cancelTokenToTokenBondRequest(tokenBondRequest memory request) public payable returns (bool) {
+    int index = indexOfTokenBondRequest(request);
     require(index != -1, 'no bond request for this address');
-    uint amount = tokenBondRequests[msg.sender].collatralAmount;
-    address token = tokenBondRequests[msg.sender].collatralToken; 
-    delete tokenBondRequests[msg.sender];
-    delete tokenBondRequestAddresses[uint(index)];
+    require(tokenBondRequests[uint(index)].borrower == msg.sender, 'not the borrower');
+    uint amount = tokenBondRequests[uint(index)].collatralAmount;
+    address token = tokenBondRequests[uint(index)].collatralToken; 
+    delete tokenBondRequests[uint(index)];
     IERC20 tokenContract = IERC20(token);
-    bool status = tokenContract.transfer(msg.sender, amount);
+    bool status = tokenContract.transfer(request.borrower, amount);
     require(status, 'tranfer from BondManager to msg.sender failed');
     return true;
+  }
+
+  function getBondRequests() public view returns (bondRequests memory) {
+    return bondRequests(ethBondRequests, tokenBondRequests);
+  }
+
+  function lendToETHBorrower(ethBondRequest memory request) public payable {
+    int index = indexOfETHBondRequest(request);
+    require(index != -1, 'no bond request for this address'); 
+
+    lenderContracts[msg.sender] = new Lender(request.borrower, address(1), request.token, request.tokenAmount, request.durationInHours, request.intrestYearly);
+    borrowerContracts[request.borrower] = new Borrower(msg.sender, address(1), request.token, request.tokenAmount, request.durationInHours, request.intrestYearly);
+    delete ethBondRequests[uint(index)];
+
+    IERC20 borrowingTokenContract = IERC20(request.token);
+    uint allowance = borrowingTokenContract.allowance(msg.sender, address(this));
+    require(allowance >= request.tokenAmount, 'allowance is not high ehough');
+    
+    bool status1 = borrowingTokenContract.transferFrom(msg.sender, address(this), request.tokenAmount);
+    bool status2 = borrowingTokenContract.transfer(address(borrowerContracts[request.borrower]), request.tokenAmount);
+    require(address(this).balance >= request.ETHAmount, 'Contract does not have enough Ether');
+    require(request.ETHAmount > 0, 'ETHAmount should be greater than zero');
+    sendViaCall(payable(address(lenderContracts[msg.sender])), request.ETHAmount);
+    require(status1 && status2, 'transferFrom failed');
+  }
+
+  function lendToTokenBorrower(tokenBondRequest memory request) public {
+    int index = indexOfTokenBondRequest(request);
+    require(index != -1, 'no bond request for this address');
+
+    lenderContracts[msg.sender] = new Lender(request.borrower, request.collatralToken, request.borrowingtoken, request.borrowingAmount, request.durationInHours, request.intrestYearly);
+    borrowerContracts[request.borrower] = new Borrower(msg.sender, request.collatralToken, request.borrowingtoken, request.borrowingAmount, request.durationInHours, request.intrestYearly);
+    delete tokenBondRequests[uint(index)];
+
+    IERC20 borrowingTokenContract = IERC20(request.borrowingtoken);
+    IERC20 collatralTokenContract = IERC20(request.collatralToken);
+    uint allowance = borrowingTokenContract.allowance(msg.sender, address(this));
+    require(allowance >= request.borrowingAmount, 'allowance is not high ehough');
+    
+    bool status1 = borrowingTokenContract.transferFrom(msg.sender, address(this), request.borrowingAmount);
+    bool status2 = borrowingTokenContract.transfer(address(borrowerContracts[request.borrower]), request.borrowingAmount);
+    bool status3 = collatralTokenContract.transfer(address(lenderContracts[msg.sender]), request.collatralAmount);
+    require(status1 && status2 && status3, 'transferFrom failed');
   }
 }
