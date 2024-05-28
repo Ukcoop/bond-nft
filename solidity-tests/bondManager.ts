@@ -1,6 +1,8 @@
 import { ethers } from 'hardhat';
 const { expect } = require("chai");
 
+import ABI from '../constants/abi';
+
 // these can have interfaces
 let bondManager: any;
 let testingHelper: any;
@@ -11,10 +13,6 @@ const WETHAddress = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 const WBTCAddress = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
 const USDCAddress = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 
-const abi = [
-  'function approve(address spender, uint256 value) public returns (bool)'
-];
-
 it('should deploy bond mamager', async() => {
   bondManager = await ethers.deployContract('BondManager');
 });
@@ -24,11 +22,11 @@ it('should deploy testing helper', async() => {
 });
 
 it('should connect to the WBTC contract', async() => {
-  WBTC = new ethers.Contract(WBTCAddress, abi, ethers.provider);
+  WBTC = new ethers.Contract(WBTCAddress, ABI.token, ethers.provider);
 });
 
 it('should connect to the USDC contract', async() => {
-  USDC = new ethers.Contract(USDCAddress, abi, ethers.provider);
+  USDC = new ethers.Contract(USDCAddress, ABI.token, ethers.provider);
 });
 
 it('should allow the user to post a bond with ETH as collatral', async() => {
@@ -55,6 +53,39 @@ it('should allow another user to supply their WBTC for the loan', async() => {
   let amount = await testingHelper.connect(other).getTokenBalance(WBTCAddress);
   let res = await(await WBTC.connect(other).approve(bondManager.target, amount)).wait();
   res = await bondManager.connect(other).lendToETHBorrower([...res1[0][1]]);
+});
+
+it('should allow the borrower to withdraw some borrowed tokens', async() => {
+  let addr;
+  [addr] = await ethers.getSigners();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
+  let res = borrower.connect(addr).withdrawBorrowedTokens(BigInt(10 ** 5));
+});
+
+it('should allow the borrower to deposit some borrowed tokens', async() => {
+  let addr;
+  [addr] = await ethers.getSigners();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
+  let res = await(await WBTC.connect(addr).approve(address, BigInt(10 ** 5))).wait();
+  res = borrower.connect(addr).depositBorrowedTokens(BigInt(10 ** 5));
+});
+
+it('should allow the borrower contract to liquidate', async() => {
+  let addr;
+  [addr] = await ethers.getSigners();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
+  let res = borrower.connect(addr).liquidate();
+});
+
+it('should allow the lender contract to liquidate', async() => {
+  let addr;
+  [addr] = await ethers.getSigners();
+  let address = await bondManager.connect(addr).getAddressOfLenderContract(addr.address);
+  let borrower = new ethers.Contract(address, ABI.lender, ethers.provider);
+  let res = borrower.connect(addr).setLiquidation();
 });
 
 it('should allow the user to cancel a ETH bond request', async() => {

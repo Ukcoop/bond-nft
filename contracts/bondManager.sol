@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 import "./borrowerNFT.sol";
 import './lenderNFT.sol';
 
@@ -35,8 +35,8 @@ struct bondRequests {
 contract BondManager is ReentrancyGuard {
   ethBondRequest[] ethBondRequests;
   tokenBondRequest[] tokenBondRequests;
-  mapping(address => Borrower) public borrowerContracts;
-  mapping(address => Lender) public lenderContracts;
+  mapping(address => Borrower) public borrowerContracts; // bug: the address can only have one borrower
+  mapping(address => Lender) public lenderContracts; // bug: the address can only have one lender
 
   address[] whitelistedTokens;
 
@@ -81,8 +81,6 @@ contract BondManager is ReentrancyGuard {
     
     ethBondRequest memory newRequest = ethBondRequest(msg.sender, msg.value, borrowingToken, borrowingAmount, termInHours, intrestYearly);
     ethBondRequests.push(newRequest);
-    
-    console.log('%s %s', msg.sender, ethBondRequests[0].borrower);
 
     return true;
   }
@@ -106,9 +104,19 @@ contract BondManager is ReentrancyGuard {
     return true;
   }
 
+  function getAddressOfBorrowerContract() public view returns (address) {
+    return address(borrowerContracts[msg.sender]);
+  }
+
+  function getAddressOfLenderContract(address lender) public view returns (address) {
+    return address(lenderContracts[lender]);
+  }
+
   function indexOfETHBondRequest(ethBondRequest memory request) internal view returns (int) {
     int index = -1;
-    for (uint i = 0; i < ethBondRequests.length; i++) {
+    uint len = ethBondRequests.length;
+
+    for (uint i = 0; i < len; i++) {
       bool isMatching = (
         (ethBondRequests[i].borrower == request.borrower) &&
         (ethBondRequests[i].ETHAmount == request.ETHAmount) &&
@@ -127,8 +135,9 @@ contract BondManager is ReentrancyGuard {
 
   function indexOfTokenBondRequest(tokenBondRequest memory request) internal view returns (int) {
     int index = -1;
+    uint len = tokenBondRequests.length; 
 
-    for (uint i = 0; i < tokenBondRequests.length; i++) {
+    for (uint i = 0; i < len; i++) {
       bool isMatching = (
         (tokenBondRequests[i].borrower == request.borrower) &&
         (tokenBondRequests[i].collatralToken == request.collatralToken) &&
@@ -147,7 +156,6 @@ contract BondManager is ReentrancyGuard {
   function cancelETHToTokenBondRequest(ethBondRequest memory request) public payable returns (bool) {
     int index = indexOfETHBondRequest(request);
     require(index != -1, 'no bond request for this address');
-    console.log('%s %s',ethBondRequests[uint(index)].borrower, msg.sender);
     require(ethBondRequests[uint(index)].borrower == msg.sender, 'not the borrower');
     uint amount = ethBondRequests[uint(index)].ETHAmount;
     delete ethBondRequests[uint(index)];
@@ -176,8 +184,8 @@ contract BondManager is ReentrancyGuard {
     int index = indexOfETHBondRequest(request);
     require(index != -1, 'no bond request for this address'); 
 
-    lenderContracts[msg.sender] = new Lender(request.borrower, address(1), request.token, request.tokenAmount, request.durationInHours, request.intrestYearly);
-    borrowerContracts[request.borrower] = new Borrower(msg.sender, address(1), request.token, request.tokenAmount, request.durationInHours, request.intrestYearly);
+    lenderContracts[msg.sender] = new Lender(request.borrower, msg.sender, address(1), request.token, request.tokenAmount, request.durationInHours, request.intrestYearly);
+    borrowerContracts[request.borrower] = new Borrower(request.borrower, msg.sender, address(1), request.token, request.ETHAmount, request.tokenAmount, request.durationInHours, request.intrestYearly);
     delete ethBondRequests[uint(index)];
 
     IERC20 borrowingTokenContract = IERC20(request.token);
@@ -196,8 +204,8 @@ contract BondManager is ReentrancyGuard {
     int index = indexOfTokenBondRequest(request);
     require(index != -1, 'no bond request for this address');
 
-    lenderContracts[msg.sender] = new Lender(request.borrower, request.collatralToken, request.borrowingtoken, request.borrowingAmount, request.durationInHours, request.intrestYearly);
-    borrowerContracts[request.borrower] = new Borrower(msg.sender, request.collatralToken, request.borrowingtoken, request.borrowingAmount, request.durationInHours, request.intrestYearly);
+    lenderContracts[msg.sender] = new Lender(request.borrower, msg.sender, request.collatralToken, request.borrowingtoken, request.borrowingAmount, request.durationInHours, request.intrestYearly);
+    borrowerContracts[request.borrower] = new Borrower(request.borrower, msg.sender, request.collatralToken, request.borrowingtoken, request.collatralAmount, request.borrowingAmount, request.durationInHours, request.intrestYearly);
     delete tokenBondRequests[uint(index)];
 
     IERC20 borrowingTokenContract = IERC20(request.borrowingtoken);
