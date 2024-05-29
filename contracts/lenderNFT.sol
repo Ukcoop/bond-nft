@@ -1,54 +1,27 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 
 import './TestingHelper.sol';
+import './shared.sol';
 
-contract Lender is ReentrancyGuard {
-  address immutable borrower;
-  address immutable lender;
-  address immutable owner;
-  address immutable collatralToken; // this will be address(1) for native eth
-  address immutable borrowingToken;
-  uint256 immutable borrowingAmount;
-  uint256 immutable durationInHours;
-  uint256 immutable intrestYearly;
-  bool liquidated;
-
-  constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint256 borrowingAmount1, uint durationInHours1, uint intrestYearly1) {
-    require(borrower1 != address(0), 'borrower address can not be address(0)');
-    require(lender1 != address(0), 'lender address can not be address(0)');
-    require(collatralToken1 != address(0), 'collatral token can not be address(0)');
-    require(borrowingToken1 != address(0), 'borrowing token can not be address(0)');
-    require(borrowingAmount1 != 0, 'cant borrow nothing');
-    require(durationInHours1 > 24, 'bond length is too short');
-    require(intrestYearly1 > 2 && intrestYearly1 < 15, 'intrest is not in this range: (2 to 15)%');
-    borrower = borrower1;
-    lender = lender1;
-    owner = msg.sender;
-    collatralToken = collatralToken1;
-    borrowingToken = borrowingToken1;
-    borrowingAmount = borrowingAmount1;
-    durationInHours = durationInHours1;
-    intrestYearly = intrestYearly1;
-    liquidated = false;
-  }
+contract Lender is Bond, ReentrancyGuard {
+  constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
 
   function sendETHToBorrower(uint value) internal {
     require(value != 0, 'can not send nothing');
     //slither-disable-next-line arbitrary-send-eth
-    (bool sent, bytes memory data) = payable(borrower).call{value: value}("");// since the borrower variable is immutable and only set by the bondManager, this is a false positive
+    (bool sent, bytes memory data) = payable(borrower).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
     data = data; // this is just here to tell solc that it is being used
-    require(sent, "Failed to send Ether");
+    require(sent, 'Failed to send Ether');
   }
 
   receive() external payable {}
-  
+
   function setLiquidation() public nonReentrant {
-    // this is commented out for testing right now, the system that would call this it not made yet
-    //require(msg.sender == owner, 'you are not authorized to do this action');
+    require(msg.sender == owner, 'you are not authorized to do this action');
     liquidated = true;
     _liquidate();
   }
@@ -83,6 +56,7 @@ contract Lender is ReentrancyGuard {
     require(status, 'approve failed');
     
     uint res = helper.swapTokenForToken(collatralToken, borrowingToken, tmp);
+    require(res >= amountOwed, 'did not get required tokens from dex');
         
     require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
         

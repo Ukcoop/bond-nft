@@ -1,64 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import './bondManager.sol';
+import './shared.sol';
 
-struct getDataResponse {
-  address borrower;
-  address lender;
-  address collatralToken;
-  address borrowingToken;
-  uint256 collatralAmount;
-  uint256 borrowingAmount;
-  uint256 durationInHours;
-  uint256 intrestYearly;
-}
+contract Borrower is Bond {
 
-contract Borrower {
-  address immutable collatralToken; // this will be address(1) for native eth
-  address immutable borrowingToken;
-  uint256 immutable collatralAmount;
-  uint256 immutable borrowingAmount;
-  uint256 immutable durationInHours;
-  uint256 immutable intrestYearly;
-  address immutable borrower;
-  address immutable lender;
-  address immutable owner;
-  uint256 borrowed;
-  bool liquidated;
+constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
+
 
   event Withdraw(address borrower, uint amount);
   event Deposit(address sender, address borrower, uint amount);
 
-  constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint collatralAmount1, uint borrowingAmount1, uint256 durationInHours1, uint256 intrestYearly1) {
-    require(borrower1 != address(0), 'borrower address can not be address(0)');
-    require(lender1 != address(0), 'lender address can not be address(0)');
-    require(collatralToken1 != address(0), 'collatral token can not be address(0)');
-    require(borrowingToken1 != address(0), 'borrowing token can not be address(0)');
-    require(borrowingAmount1 != 0, 'cant borrow nothing');
-    require(durationInHours1 > 24, 'bond length is too short');
-    require(intrestYearly1 > 2 && intrestYearly1 < 15, 'intrest is not in this range: (2 to 15)%');
-    
-    collatralToken = collatralToken1;
-    borrowingToken = borrowingToken1;
-    collatralAmount = collatralAmount1;
-    borrowingAmount = borrowingAmount1;
-    durationInHours = durationInHours1;
-    intrestYearly = intrestYearly1;
-    borrower = borrower1;
-    lender = lender1;
-    owner = msg.sender;
-    
-    borrowed = 0;
-    liquidated = false;
-  }
-
   //receive() external payable {}
-
-  function getData() public view returns (getDataResponse memory) {
-    return getDataResponse(borrower, lender, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
-  }
 
   function liquidate() public {
     require(msg.sender == owner || msg.sender == borrower, 'you are not authorized to this action');
@@ -68,6 +23,7 @@ contract Borrower {
     address addr = bondManager.getAddressOfLenderContract(lender);
     bool status = tokenContract.transfer(addr, tokenContract.balanceOf(address(this)));
     require(status, 'transfer failed');
+    BondManager(owner).liquifyFromBorrower(borrower, lender);
   }
 
   function withdrawBorrowedTokens(uint amount) public {

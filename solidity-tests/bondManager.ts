@@ -1,5 +1,5 @@
 import { ethers } from 'hardhat';
-const { expect } = require("chai");
+const { expect } = require('chai');
 
 import ABI from '../constants/abi';
 
@@ -48,17 +48,17 @@ it('should allow another user to supply their WBTC for the loan', async() => {
   let other;
   [, other] = await ethers.getSigners();
   let res1 = await bondManager.getBondRequests();
-  let input = await testingHelper.getAmountIn(WETHAddress, WBTCAddress, res1[0][1][3] + (res1[0][1][3] / BigInt(10)));
+  let input = await testingHelper.getAmountIn(WETHAddress, WBTCAddress, res1[1][4] + (res1[1][4] / BigInt(10)));
   await(await testingHelper.connect(other).swapETHforToken(WBTCAddress, {value: input})).wait();
   let amount = await testingHelper.connect(other).getTokenBalance(WBTCAddress);
   let res = await(await WBTC.connect(other).approve(bondManager.target, amount)).wait();
-  res = await bondManager.connect(other).lendToETHBorrower([...res1[0][1]]);
+  res = await bondManager.connect(other).lendToETHBorrower([...res1[1]]);
 });
 
 it('should allow the borrower to withdraw some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   let res = borrower.connect(addr).withdrawBorrowedTokens(BigInt(10 ** 5));
 });
@@ -66,33 +66,25 @@ it('should allow the borrower to withdraw some borrowed tokens', async() => {
 it('should allow the borrower to deposit some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   let res = await(await WBTC.connect(addr).approve(address, BigInt(10 ** 5))).wait();
   res = borrower.connect(addr).depositBorrowedTokens(BigInt(10 ** 5));
 });
 
-it('should allow the borrower contract to liquidate', async() => {
+it('should allow the borrower and lender contract to liquidate', async() => {
   let addr;
   [addr] = await ethers.getSigners();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   let res = borrower.connect(addr).liquidate();
-});
-
-it('should allow the lender contract to liquidate', async() => {
-  let addr;
-  [addr] = await ethers.getSigners();
-  let address = await bondManager.connect(addr).getAddressOfLenderContract(addr.address);
-  let borrower = new ethers.Contract(address, ABI.lender, ethers.provider);
-  let res = borrower.connect(addr).setLiquidation();
 });
 
 it('should allow the user to cancel a ETH bond request', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   let res1 = await bondManager.getBondRequests();
-  let res = await bondManager.connect(addr).cancelETHToTokenBondRequest([...res1[0][0]]);
+  let res = await bondManager.connect(addr).cancelETHToTokenBondRequest([...res1[0]]);
   expect(res);
 });
 
@@ -120,17 +112,17 @@ it('should allow another user to supply their USDC for the loan', async() => {
   let other;
   [, other] = await ethers.getSigners();
   let res1 = await bondManager.getBondRequests();
-  let input = await testingHelper.getAmountIn(WETHAddress, USDCAddress, res1[1][1][4] + (res1[1][1][4] / BigInt(10)));
+  let input = await testingHelper.getAmountIn(WETHAddress, USDCAddress, res1[1][4] + (res1[1][4] / BigInt(10)));
   await(await testingHelper.connect(other).swapETHforToken(USDCAddress, {value: input})).wait();
   let amount = await testingHelper.connect(other).getTokenBalance(USDCAddress);
   let res = await(await USDC.connect(other).approve(bondManager.target, amount)).wait();
-  res = await bondManager.connect(other).lendToTokenBorrower([...res1[1][1]]);
+  res = await bondManager.connect(other).lendToTokenBorrower([...res1[1]]);
 });
 
 it('should allow the user to cancel a Token bond request', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   let res1 = await bondManager.getBondRequests();
-  let res = await bondManager.connect(addr).cancelTokenToTokenBondRequest([...res1[1][0]]);
+  let res = await bondManager.connect(addr).cancelTokenToTokenBondRequest([...res1[0]]);
   expect(res);
 });
