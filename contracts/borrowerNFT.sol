@@ -13,7 +13,7 @@ constructor(address borrower1, address lender1, address collatralToken1, address
   event Withdraw(address borrower, uint amount);
   event Deposit(address sender, address borrower, uint amount);
 
-  //receive() external payable {}
+  receive() external payable {}
 
   function liquidate() public {
     require(msg.sender == owner || msg.sender == borrower, 'you are not authorized to this action');
@@ -34,6 +34,21 @@ constructor(address borrower1, address lender1, address collatralToken1, address
     IERC20 tokenContract = IERC20(borrowingToken);
     bool status = tokenContract.transfer(borrower, amount);
     require(status, 'withdraw failed');
+  }
+
+  function withdrawBorrowedETH(uint amount) public {
+    require(msg.sender == borrower, 'you are not the borrower');
+    require(borrowed + amount <= borrowingAmount, 'not enough balance');
+    borrowed += amount;
+    emit Withdraw(borrower, amount);
+    sendETHToBorrower(amount); 
+  }
+
+  function depositBorrowedETH() public payable {
+    // this can be called by anywone, for users with bots that want them to pay off debts.
+    require(borrowed - msg.value > 0, 'you are sending too much ETH');
+    borrowed -= msg.value;
+    emit Deposit(msg.sender, borrower, msg.value);
   }
 
   function depositBorrowedTokens(uint amount) public {

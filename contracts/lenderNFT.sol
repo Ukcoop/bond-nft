@@ -10,14 +10,6 @@ import './shared.sol';
 contract Lender is Bond, ReentrancyGuard {
   constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
 
-  function sendETHToBorrower(uint value) internal {
-    require(value != 0, 'can not send nothing');
-    //slither-disable-next-line arbitrary-send-eth
-    (bool sent, bytes memory data) = payable(borrower).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
-    data = data; // this is just here to tell solc that it is being used
-    require(sent, 'Failed to send Ether');
-  }
-
   receive() external payable {}
 
   function setLiquidation() public nonReentrant {

@@ -22,6 +22,7 @@ contract Bond {
   uint256 immutable collatralAmount;
   uint256 immutable durationInHours;
   uint256 immutable intrestYearly;
+  //slither-disable-next-line immutable-states
   uint256 borrowed;
   bool liquidated;
 
@@ -49,4 +50,14 @@ contract Bond {
   function getData() public view returns (getDataResponse memory) {
     return getDataResponse(borrower, lender, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
   }
+  
+  // slither-disable-start low-level-calls
+  // slither-disable-start arbitrary-send-eth
+  function sendETHToBorrower(uint value) internal {
+    require(value != 0, 'cannot send nothing');
+    (bool sent,) = payable(borrower).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
+    require(sent, 'Failed to send Ether');
+  }
+  // slither-disable-end low-level-calls
+  // slither-disable-end arbitrary-send-eth
 }

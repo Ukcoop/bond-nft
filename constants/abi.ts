@@ -27,12 +27,12 @@ export default {
         },
         {
           "internalType": "uint256",
-          "name": "collatralAmount1",
+          "name": "borrowingAmount1",
           "type": "uint256"
         },
         {
           "internalType": "uint256",
-          "name": "borrowingAmount1",
+          "name": "collatralAmount1",
           "type": "uint256"
         },
         {
@@ -92,6 +92,13 @@ export default {
       ],
       "name": "Withdraw",
       "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "depositBorrowedETH",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
     },
     {
       "inputs": [
@@ -176,10 +183,27 @@ export default {
           "type": "uint256"
         }
       ],
+      "name": "withdrawBorrowedETH",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
       "name": "withdrawBorrowedTokens",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
+    },
+    {
+      "stateMutability": "payable",
+      "type": "receive"
     }
   ],
   lender: [

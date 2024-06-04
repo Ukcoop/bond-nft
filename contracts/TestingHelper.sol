@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 interface Irouter {
+  //slither-disable-next-line naming-convention
   function WETH() external pure returns (address);
   function getAmountsOut(uint amountIn, address[] memory path) external view returns (uint[] memory amounts);
   function getAmountsIn(uint amountOut, address[] memory path) external view returns (uint[] memory amounts);
