@@ -10,15 +10,16 @@ import './requestManager.sol';
 contract BondContractsManager {
   mapping(address => Borrower) public borrowerContracts;
   mapping(address => Lender) public lenderContracts;
-  RequestManager requestManager;
-  address deployer;
+  RequestManager immutable requestManager;
+  address immutable deployer;
   address bondManagerAddress;
   
   constructor(address _requestManager) {
     requestManager = RequestManager(_requestManager);
     deployer = msg.sender;
   }
-
+  
+  //slither-disable-next-line naming-convention
   function setAddress(address _bondManagerAddress) public {
     require(_bondManagerAddress != address(0), 'bondManagerAddress can not be address(0)');
     require(msg.sender == deployer, 'only the deployer can do this action');
@@ -28,7 +29,7 @@ contract BondContractsManager {
 
   // slither-disable-start low-level-calls
   // slither-disable-start arbitrary-send-eth 
-  function sendViaCall(address payable to, uint value) public payable {
+  function sendViaCall(address payable to, uint value) internal {
     require(to != payable(address(0)), 'cant send to the 0 address');
     require(value != 0, 'can not send nothing');
     (bool sent,) = to.call{value: value}('');
@@ -58,12 +59,15 @@ contract BondContractsManager {
     IERC20 tokenContract = IERC20(token);
     return tokenContract.transfer(to, amount);
   }
-
-  function liquifyFromBorrower(address borrower, address lender) public {
-    require(msg.sender == address(borrowerContracts[borrower]), 'you are not authorized to do this action');
-    getDataResponse memory res = lenderContracts[borrower].getData();
+  
+  function liquidate(address borrower, address lender) public {
+    require(msg.sender == address(borrowerContracts[borrower]) || msg.sender == bondManagerAddress, 'you are not authorized to do this action');
+    getDataResponse memory res = lenderContracts[lender].getData();
     require(res.borrower == borrower, 'the lender does not have this address as the borrower');
-    lenderContracts[lender].setLiquidation();
+    borrowerContracts[borrower].liquidate(address(lenderContracts[lender]));
+    lenderContracts[lender].liquidate();
+    delete borrowerContracts[borrower]; 
+    delete lenderContracts[lender]; 
   }
 
   function getAddressOfBorrowerContract(address borrower) public view returns (address) {

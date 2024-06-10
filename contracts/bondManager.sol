@@ -1,32 +1,32 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
+
 import './borrowerNFT.sol';
 import './lenderNFT.sol';
+import './shared.sol';
 import './bondManagerUtils/requestManager.sol';
 import './bondManagerUtils/bondContractsManager.sol';
 
-contract BondManager {
+struct addressPair {
+  address borrower;
+  address lender;
+}
+
+contract BondManager is AutomationCompatibleInterface {
   mapping(address => Borrower) public borrowerContracts;
   mapping(address => Lender) public lenderContracts;
+  addressPair[] bondPairs;
+  bool immutable testing;
   RequestManager immutable requestManager;
   BondContractsManager immutable bondContractsManager;
 
-  constructor(address _requestManagerAddress, address _bondContractsManagerAddress) {
+  constructor(address _requestManagerAddress, address _bondContractsManagerAddress, bool _testing) {
     requestManager = RequestManager(_requestManagerAddress);
     bondContractsManager = BondContractsManager(_bondContractsManagerAddress);
+    testing = _testing;
   }
-
-  // slither-disable-start low-level-calls
-  // slither-disable-start arbitrary-send-eth
-  function sendViaCall(address payable to, uint value) public payable {
-    require(to != payable(address(0)), 'cant send to the 0 address');
-    require(value != 0, 'can not send nothing');
-    (bool sent,) = to.call{value: value}('');
-    require(sent, 'Failed to send Ether');
-  }
-  // slither-disable-end low-level-calls
-  // slither-disable-end arbitrary-send-eth
 
   function getRequestManagerAddress() public view returns (address) {
     return address(requestManager);
@@ -74,8 +74,75 @@ contract BondManager {
     return bondContractsManager.getAddressOfLenderContract(lender);
   }
 
-  function liquifyFromBorrower(address borrower, address lender) public {
-    bondContractsManager.liquifyFromBorrower(borrower, lender);
+  function liquidateFromBorrower(address borrower, address lender) public {
+    require(msg.sender == borrower, 'you are not authorized to do this action');
+    bondContractsManager.liquidate(borrower, lender);
+  }
+
+  function deleteBondPair(address borrower, address lender) internal {
+    uint index = 0;
+    uint len = bondPairs.length;
+    for(uint i = 0; i < len; i++) {
+      if(bondPairs[i].borrower == borrower && bondPairs[i].lender == lender) {
+        index = i;
+        break;
+      }
+    }
+
+    if(index >= len) {
+      bondPairs.pop();
+      return;
+    }
+
+    for(uint i = index; i < len - 1; i++) {
+      bondPairs[i] = bondPairs[i + 1];
+    }
+
+    bondPairs.pop();
+  }
+  
+  // slither-disable-start calls-loop
+  function liquidate(address borrower, address lender) internal {
+    bondContractsManager.liquidate(borrower, lender);
+  }
+  // slither-disable-end calls-loop
+  
+  function getRequiredLquidations() internal view returns (bool, bytes memory) {
+    bool upkeepNeeded = false;
+    uint len = bondPairs.length;
+
+    for(uint i = 0; i < len; i++) {
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lender));
+      bool yes = testing || bondContractInstance.hasMatured();
+      if(yes) {
+        upkeepNeeded = true;
+      }
+    }
+
+    return (upkeepNeeded, bytes(''));
+  }
+
+  function checkUpkeepWithNoCallData() public view returns (bool, bytes memory) {
+    return getRequiredLquidations();
+  }  
+
+  function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory) {
+    return getRequiredLquidations();
+  }
+
+  function performUpkeep(bytes calldata) external override {
+    uint len = bondPairs.length;
+    
+    // slither-disable-start calls-loop
+    for(uint i = 0; i < len; i++) {
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lender));
+      bool yes = testing || bondContractInstance.hasMatured();
+      if(yes) {
+        liquidate(bondPairs[i].borrower, bondPairs[i].lender);
+        deleteBondPair(bondPairs[i].borrower, bondPairs[i].lender);
+      }
+    }
+    // slither-disable-end calls-loop
   }
 
   function cancelETHToTokenBondRequest(bondRequest memory request) public returns (bool) {
@@ -91,14 +158,17 @@ contract BondManager {
   }
 
   function lendToETHToTokenBorrower(bondRequest memory request) public payable {
+    bondPairs.push(addressPair(request.borrower,msg.sender));
     bondContractsManager.lendToETHToTokenBorrower(msg.sender, request); 
   }
 
   function lendToTokenToETHBorrower(bondRequest memory request) public payable {
+    bondPairs.push(addressPair(request.borrower,msg.sender));
     bondContractsManager.lendToTokenToETHBorrower{value: msg.value}(msg.sender, request);
   }
 
   function lendToTokenToTokenBorrower(bondRequest memory request) public {
+    bondPairs.push(addressPair(request.borrower,msg.sender));
     bondContractsManager.lendToTokenToTokenBorrower(msg.sender, request);
   }
 }

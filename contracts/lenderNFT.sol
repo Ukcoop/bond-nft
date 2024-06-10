@@ -12,48 +12,68 @@ contract Lender is Bond, ReentrancyGuard {
 
   receive() external payable {}
 
-  function setLiquidation() public nonReentrant {
+  function liquidate() public nonReentrant {
     require(msg.sender == owner, 'you are not authorized to do this action');
     liquidated = true;
     _liquidate();
   }
 
   function _liquidate() internal {
-    IERC20 borrowingTokenContract = IERC20(borrowingToken); 
-    uint amountOwed = borrowingAmount - borrowingTokenContract.balanceOf(address(this));
+    uint amountOwed = 0;
+    IERC20 borrowingTokenContract = IERC20(borrowingToken);// when eth is the token borrowed, this will not be functional so it will not be used 
+    if(borrowingToken != address(1)) {
+      amountOwed = borrowingAmount - borrowingTokenContract.balanceOf(address(this));
+    } else {
+      amountOwed = borrowingAmount - address(this).balance;
+    }
 
-    if (amountOwed != 0) {
-      TestingHelper helper = new TestingHelper();
-      if (collatralToken == address(1)) {
-        _handleEth(helper, amountOwed, borrowingTokenContract);
-      } else {
-        _handleToken(helper, amountOwed, borrowingTokenContract);
-      }
+    TestingHelper helper = new TestingHelper();
+    if (collatralToken == address(1)) {
+      _handleEth(helper, amountOwed, borrowingTokenContract);
+    } else {
+      _handleToken(helper, amountOwed, borrowingTokenContract);
     }
   }
 
   function _handleEth(TestingHelper helper, uint amountOwed, IERC20 borrowingTokenContract) internal {
-    uint tmp = helper.getAmountIn(borrowingToken, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1, amountOwed);
-    tmp = helper.swapETHforToken{value: tmp}(borrowingToken);
-
-    require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
+    if(amountOwed != 0) {
+      uint tmp = helper.getAmountIn(borrowingToken, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1, amountOwed);
+      tmp = helper.swapETHforToken{value: tmp}(borrowingToken);
+      require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
+    }
+    
+    bool status = borrowingTokenContract.transfer(lender, borrowingAmount);
     sendETHToBorrower(address(this).balance);
+    require(status, 'transfer failed');
   }
 
   function _handleToken(TestingHelper helper, uint amountOwed, IERC20 borrowingTokenContract) internal {
     IERC20 collatralTokenContract = IERC20(collatralToken);
-    uint tmp = helper.getAmountIn(borrowingToken, collatralToken, amountOwed);
+    if(amountOwed != 0) {
+      uint tmp = helper.getAmountIn(((borrowingToken == address(1)) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : borrowingToken), collatralToken, amountOwed);
 
-    bool status = collatralTokenContract.approve(address(helper), tmp);
-    require(status, 'approve failed');
+      bool status = collatralTokenContract.approve(address(helper), tmp);
+      require(status, 'approve failed');
+
+      if(borrowingToken != address(1)) {
+        uint res = helper.swapTokenForToken(collatralToken, borrowingToken, tmp);
+        require(res >= amountOwed, 'did not get required tokens from dex');
+      } else {
+        // uint res = helper.swapTokenForETH(collatralToken, tmp);
+        // require(address(this).balance >= borrowingAmount, 'swap did not result in enough tokens');
+      }
+    }
     
-    uint res = helper.swapTokenForToken(collatralToken, borrowingToken, tmp);
-    require(res >= amountOwed, 'did not get required tokens from dex');
-        
-    require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
-        
-    status = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
-    require(status, 'transfer failed');
+    if(borrowingToken != address(1)) {
+      require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
+      bool status1 = borrowingTokenContract.transfer(lender, borrowingAmount);
+      bool status2 = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
+      require(status1 && status2, 'transfer failed');
+    } else {
+      sendETHToLender(borrowingAmount);
+      bool status = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this))); 
+      require(status, 'transfer failed');
+    }
   }
 
   function withdawLentTokens() public {

@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "test": "npx hardhat test --network localhost && vitest --run",
-    "audit": "slither ."
+    "audit": "slither . --exclude solc-version,pragma --filter-paths node_modules"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.1.1",
     "@openzeppelin/contracts": "^5.0.2",
     "ethers": "^6.12.2",
     "next": "14.2.3",

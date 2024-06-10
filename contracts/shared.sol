@@ -12,6 +12,12 @@ struct getDataResponse {
   uint256 intrestYearly;
 }
 
+interface BondInterface {
+  function getData() external view returns (getDataResponse memory);
+  function getOwed() external view returns (uint);
+  function hasMatured() external view returns (bool);
+}
+
 contract Bond {
   address immutable borrower;
   address immutable lender;
@@ -22,6 +28,7 @@ contract Bond {
   uint256 immutable collatralAmount;
   uint256 immutable durationInHours;
   uint256 immutable intrestYearly;
+  uint256 immutable startTime;
   //slither-disable-next-line immutable-states
   uint256 borrowed;
   bool liquidated;
@@ -43,6 +50,7 @@ contract Bond {
     collatralAmount = collatralAmount1;
     durationInHours = durationInHours1;
     intrestYearly = intrestYearly1;
+    startTime = block.timestamp;
     liquidated = false;
     borrowed = 0;
   }
@@ -51,6 +59,30 @@ contract Bond {
     return getDataResponse(borrower, lender, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
   }
   
+  // slither-disable-start timestamp
+  // slither-disable-start divide-before-multiply
+  // slither-disable-start assembly
+  function getOwed() public view returns (uint owed) {
+    uint start = startTime;
+    uint intrest = intrestYearly;
+    uint borrowing = borrowingAmount;
+    assembly {
+      let currentTime := timestamp()
+      let elapsedTime := div(sub(currentTime, start), 3600)
+      let interestRatePerHour := div(intrest, 8760)
+      let interestAccrued := div(mul(interestRatePerHour, elapsedTime), 100)
+      let totalOwed := mul(borrowing, add(1, interestAccrued))
+      owed := totalOwed
+    }
+  }
+  // slither-disable-end divide-before-multiply
+  // slither-disable-end assembly
+
+  function hasMatured() public view returns (bool) {
+    return ((block.timestamp - startTime) / 3600) >= durationInHours; 
+  }
+  // slither-disable-end timestamp
+
   // slither-disable-start low-level-calls
   // slither-disable-start arbitrary-send-eth
   function sendETHToBorrower(uint value) internal {
@@ -58,6 +90,13 @@ contract Bond {
     (bool sent,) = payable(borrower).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
     require(sent, 'Failed to send Ether');
   }
+
+  function sendETHToLender(uint value) internal {
+    require(value != 0, 'cannot send nothing');
+    (bool sent,) = payable(lender).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
+    require(sent, 'Failed to send Ether');
+  }
+
   // slither-disable-end low-level-calls
   // slither-disable-end arbitrary-send-eth
 }

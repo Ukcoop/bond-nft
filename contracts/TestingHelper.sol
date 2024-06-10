@@ -9,6 +9,7 @@ interface Irouter {
   function getAmountsOut(uint amountIn, address[] memory path) external view returns (uint[] memory amounts);
   function getAmountsIn(uint amountOut, address[] memory path) external view returns (uint[] memory amounts);
   function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts);
+  function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts);
   function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts);
 }
 
@@ -19,7 +20,7 @@ contract TestingHelper {
     router = Irouter(0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506);
   }
 
-  function swapETHforToken(address token) public payable returns (uint amount) {
+  function swapETHforToken(address token) public payable returns (uint) {
     address[] memory path = new address[](2);
     path[0] = router.WETH();
     path[1] = token;
@@ -28,6 +29,16 @@ contract TestingHelper {
     uint outMin = amountsOut[1] - (amountsOut[1] / 10);
 
     return router.swapExactETHForTokens{value: msg.value}(outMin, path, msg.sender, block.timestamp + 32000)[1];
+  }
+  
+  function swapTokenForETH(address token, uint amount) public payable returns (uint) {
+    address[] memory path = new address[](2);
+    path[0] = token;
+    path[1] = router.WETH();
+
+    uint[] memory amountsOut = router.getAmountsOut(msg.value, path);
+    uint outMin = amountsOut[1] - (amountsOut[1] / 10);
+    return router.swapExactTokensForETH(amount, outMin, path, msg.sender, block.timestamp + 32000)[1]; 
   }
 
   function swapTokenForToken(address tokenA, address tokenB, uint amount) public returns (uint) {

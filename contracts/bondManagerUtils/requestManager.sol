@@ -78,7 +78,7 @@ contract RequestManager {
     bondContractsManagerAddress = bondContractsManager;
   }
 
-  function sendViaCall(address payable to, uint value) public payable {
+  function sendViaCall(address payable to, uint value) internal {
     require(to != payable(address(0)), 'cant send to the 0 address');
     require(value != 0, 'can not send nothing');
     //slither-disable-next-line low-level-calls
@@ -99,7 +99,10 @@ contract RequestManager {
 
   function deleteBondRequest(uint index) public {
     require(msg.sender == bondManagerAddress || msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
-    if (index >= bondRequests.length) return;
+    if (index >= bondRequests.length) {
+      bondRequests.pop();
+      return;
+    }
     
     uint len = bondRequests.length; 
     for (uint i = index; i < len - 1; i++) {
