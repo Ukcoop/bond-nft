@@ -28,17 +28,25 @@ contract TestingHelper {
     uint[] memory amountsOut = router.getAmountsOut(msg.value, path);
     uint outMin = amountsOut[1] - (amountsOut[1] / 10);
 
-    return router.swapExactETHForTokens{value: msg.value}(outMin, path, msg.sender, block.timestamp + 32000)[1];
+    return router.swapExactETHForTokens{value: msg.value}(outMin, path, msg.sender, block.timestamp + 1200)[1];
   }
   
-  function swapTokenForETH(address token, uint amount) public payable returns (uint) {
+  function swapTokenForETH(address token, uint amount) public returns (uint) {
     address[] memory path = new address[](2);
     path[0] = token;
     path[1] = router.WETH();
 
-    uint[] memory amountsOut = router.getAmountsOut(msg.value, path);
+    uint[] memory amountsOut = router.getAmountsOut(amount, path);
     uint outMin = amountsOut[1] - (amountsOut[1] / 10);
-    return router.swapExactTokensForETH(amount, outMin, path, msg.sender, block.timestamp + 32000)[1]; 
+
+    IERC20 tokenContract = IERC20(token);
+    require(tokenContract.allowance(msg.sender, address(this)) >= amount, 'allowance is not high enough');
+    bool status = tokenContract.transferFrom(msg.sender, address(this), amount);
+    require(status, 'transferFrom, failed');
+    status = tokenContract.approve(address(router), amount);
+    require(status, 'approve failed');
+
+    return router.swapExactTokensForETH(amount, outMin, path, msg.sender, block.timestamp + 1200)[1]; 
   }
 
   function swapTokenForToken(address tokenA, address tokenB, uint amount) public returns (uint) {
@@ -50,8 +58,11 @@ contract TestingHelper {
     require(tokenContract.allowance(msg.sender, address(this)) >= amount, 'allowance is not high enough');
     bool status = tokenContract.transferFrom(msg.sender, address(this), amount);
     require(status, 'transferFrom, failed');
+    status = tokenContract.approve(address(router), amount);
+    require(status, 'approve failed');
+
     uint resAmount = router.getAmountsOut(amount, path)[1];
-    return router.swapExactTokensForTokens(amount, resAmount, path, msg.sender, block.timestamp + 32000)[1];
+    return router.swapExactTokensForTokens(amount, resAmount, path, msg.sender, block.timestamp + 1200)[1];
   }
 
   function getTokenBalance(address token) public view returns (uint) {

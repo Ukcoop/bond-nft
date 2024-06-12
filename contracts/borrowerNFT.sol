@@ -5,24 +5,13 @@ import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import './bondManagerUtils/bondContractsManager.sol';
 import './shared.sol';
 
-contract Borrower is Bond {
+contract Borrower is Bond, HandlesETH {
   constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
+  
+  receive() external payable {}
 
   event Withdraw(address borrower, uint amount);
   event Deposit(address sender, address borrower, uint amount);
-
-  receive() external payable {}
-  
-  // slither-disable-start low-level-calls
-  // slither-disable-start arbitrary-send-eth 
-  function sendViaCall(address payable to, uint value) internal {
-    require(to != payable(address(0)), 'cant send to the 0 address');
-    require(value != 0, 'can not send nothing');
-    (bool sent,) = to.call{value: value}('');
-    require(sent, 'Failed to send Ether');
-  }
-  // slither-disable-end low-level-calls
-  // slither-disable-end arbitrary-send-eth
 
   function liquidate(address lenderContract) public {
     require(msg.sender == owner || msg.sender == borrower, 'you are not authorized to this action');

@@ -18,6 +18,21 @@ interface BondInterface {
   function hasMatured() external view returns (bool);
 }
 
+abstract contract HandlesETH {
+  //receive() external payable {}
+  
+  // slither-disable-start low-level-calls
+  // slither-disable-start arbitrary-send-eth 
+  function sendViaCall(address to, uint value) internal {
+    require(to != address(0), 'cant send to the 0 address');
+    require(value != 0, 'can not send nothing');
+    (bool sent,) = payable(to).call{value: value}('');
+    require(sent, 'Failed to send Ether');
+  }
+  // slither-disable-end low-level-calls
+  // slither-disable-end arbitrary-send-eth 
+}
+
 contract Bond {
   address immutable borrower;
   address immutable lender;
@@ -82,6 +97,8 @@ contract Bond {
     return ((block.timestamp - startTime) / 3600) >= durationInHours; 
   }
   // slither-disable-end timestamp
+
+
 
   // slither-disable-start low-level-calls
   // slither-disable-start arbitrary-send-eth

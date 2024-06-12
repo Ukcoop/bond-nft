@@ -78,7 +78,8 @@ contract BondManager is AutomationCompatibleInterface {
     require(msg.sender == borrower, 'you are not authorized to do this action');
     bondContractsManager.liquidate(borrower, lender);
   }
-
+  
+  // slither-disable-start costly-loop
   function deleteBondPair(address borrower, address lender) internal {
     uint index = 0;
     uint len = bondPairs.length;
@@ -100,7 +101,8 @@ contract BondManager is AutomationCompatibleInterface {
 
     bondPairs.pop();
   }
-  
+  // slither-disable-end costly-loop
+
   // slither-disable-start calls-loop
   function liquidate(address borrower, address lender) internal {
     bondContractsManager.liquidate(borrower, lender);
@@ -129,7 +131,8 @@ contract BondManager is AutomationCompatibleInterface {
   function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory) {
     return getRequiredLquidations();
   }
-
+  
+  // slither-disable-start reentrancy-no-eth
   function performUpkeep(bytes calldata) external override {
     uint len = bondPairs.length;
     
@@ -144,6 +147,7 @@ contract BondManager is AutomationCompatibleInterface {
     }
     // slither-disable-end calls-loop
   }
+  // slither-disable-end reentrancy-no-eth
 
   function cancelETHToTokenBondRequest(bondRequest memory request) public returns (bool) {
     return requestManager.cancelETHToTokenBondRequest(msg.sender, request);

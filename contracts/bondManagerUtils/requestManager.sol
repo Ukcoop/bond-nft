@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import '../tokenBank.sol';
+import '../shared.sol';
 
 struct bondRequest {
   address borrower;
@@ -13,14 +14,15 @@ struct bondRequest {
   uint256 intrestYearly;
 }
 
-contract RequestManager {
+contract RequestManager is HandlesETH {
   address[] public whitelistedTokens;
   bondRequest[] bondRequests;
+  TokenBank immutable tokenBank;
   address immutable deployer;
   address bondManagerAddress;
   address bondContractsManagerAddress;
   
-  constructor() {
+  constructor(address _tokenBank) {
     whitelistedTokens = new address[](9);
     whitelistedTokens[0] = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1; // wrapped ETH
     whitelistedTokens[1] = 0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9; // USDT
@@ -33,6 +35,7 @@ contract RequestManager {
     whitelistedTokens[8] = 0x4D15a3A2286D883AF0AA1B3f21367843FAc63E07; // TUSD
 
     deployer = msg.sender;
+    tokenBank = TokenBank(_tokenBank);
     bondManagerAddress = address(0);
     bondContractsManagerAddress = address(0);
   }
@@ -47,28 +50,6 @@ contract RequestManager {
     return false;
   }
 
-  function transferFrom(
-    address token,
-    address from,
-    uint amount
-  ) internal returns (bool) {
-    IERC20 tokenContract = IERC20(token);
-    uint allowance = tokenContract.allowance(from, address(this));
-    require(allowance >= amount, 'allowance is not high enough');
-    //slither-disable-next-line arbitrary-send-erc20
-    bool status = tokenContract.transferFrom(from, address(this), amount);
-    return status;
-  }
-
-  function transfer(
-    address token,
-    address to,
-    uint amount
-  ) internal returns (bool) {
-    IERC20 tokenContract = IERC20(token);
-    return tokenContract.transfer(to, amount);
-  }
-
   function setAddresses(address bondManager, address bondContractsManager) public {
     require(bondManager != address(0), 'bondManager address cant be address(0)');
     require(bondContractsManager != address(0), 'bondContractsManager address cant be address(0)');
@@ -78,22 +59,14 @@ contract RequestManager {
     bondContractsManagerAddress = bondContractsManager;
   }
 
-  function sendViaCall(address payable to, uint value) internal {
-    require(to != payable(address(0)), 'cant send to the 0 address');
-    require(value != 0, 'can not send nothing');
-    //slither-disable-next-line low-level-calls
-    (bool sent,) = to.call{value: value}('');
-    require(sent, 'Failed to send Ether');
-  }
-
   function sendFromBondContractsManager(address payable to, uint value) public payable {
     require(msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
     sendViaCall(to, value);
   }
 
-  function sendTokenFromBondContractsManager(address token, address to, uint value) public returns (bool) {
+  function sendTokenFromBondContractsManager(address token, address borrower, address to, uint value) public returns (bool) {
     require(msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
-    bool status = transfer(token, to, value);
+    bool status = tokenBank.spendAllowedTokens(token, borrower, to, value);
     return status;
   }
 
@@ -163,8 +136,8 @@ contract RequestManager {
       intrestYearly
     );
     bondRequests.push(newRequest);
-    bool status = transferFrom(collatralToken, borrower, collatralAmount);
-    require(status, 'transferFrom failed');
+    uint res = tokenBank.findAllowanceEntryWithMinimumBalance(collatralToken, borrower, address(this), collatralAmount);
+    res++;
     return true;
   }
 
@@ -195,8 +168,8 @@ contract RequestManager {
       intrestYearly
     );
     bondRequests.push(newRequest);
-    bool status = transferFrom(collatralToken, borrower, collatralAmount);
-    require(status, 'transferFrom failed');
+    uint res = tokenBank.findAllowanceEntryWithMinimumBalance(collatralToken, borrower, address(this), collatralAmount);
+    res++; 
     return true;
   }
 
@@ -238,7 +211,7 @@ contract RequestManager {
     uint amount = bondRequests[uint(index)].collatralAmount;
     address token = bondRequests[uint(index)].collatralToken;
     deleteBondRequest(uint(index));
-    bool status = transfer(token, request.borrower, amount);
+    bool status = tokenBank.spendAllowedTokens(token, request.borrower, request.borrower, amount);
     require(status, 'transfer from BondManager to msg.sender failed');
     return true;
   }
@@ -246,5 +219,4 @@ contract RequestManager {
   function getBondRequests() public view returns (bondRequest[] memory) {
     return bondRequests;
   }
-
 }
