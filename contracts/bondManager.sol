@@ -149,30 +149,29 @@ contract BondManager is AutomationCompatibleInterface {
   }
   // slither-disable-end reentrancy-no-eth
 
-  function cancelETHToTokenBondRequest(bondRequest memory request) public returns (bool) {
-    return requestManager.cancelETHToTokenBondRequest(msg.sender, request);
+  function cancelETHCollatralizedBondRequest(bondRequest memory request) public returns (bool) {
+    return requestManager.cancelETHCollatralizedBondRequest(msg.sender, request);
   }
 
-  function cancelTokenToTokenBondRequest(bondRequest memory request) public payable returns (bool) {
-    return requestManager.cancelTokenToTokenBondRequest(msg.sender, request);
+  function cancelTokenCollatralizedBondRequest(bondRequest memory request) public payable returns (bool) {
+    return requestManager.cancelTokenCollatralizedBondRequest(msg.sender, request);
   }
 
   function getBondRequests() public view returns (bondRequest[] memory) {
     return requestManager.getBondRequests();
   }
 
-  function lendToETHToTokenBorrower(bondRequest memory request) public payable {
-    bondPairs.push(addressPair(request.borrower,msg.sender));
-    bondContractsManager.lendToETHToTokenBorrower(msg.sender, request); 
+  function getRequiredAmountForRequest(bondRequest memory request) public view returns (uint) {
+    return requestManager.getRequiredAmountForRequest(request); 
   }
 
-  function lendToTokenToETHBorrower(bondRequest memory request) public payable {
+  function lendToTokenBorrower(bondRequest memory request) public payable {
     bondPairs.push(addressPair(request.borrower,msg.sender));
-    bondContractsManager.lendToTokenToETHBorrower{value: msg.value}(msg.sender, request);
+    bondContractsManager.lendToTokenBorrower(msg.sender, request); 
   }
 
-  function lendToTokenToTokenBorrower(bondRequest memory request) public {
+  function lendToETHBorrower(bondRequest memory request) public payable {
     bondPairs.push(addressPair(request.borrower,msg.sender));
-    bondContractsManager.lendToTokenToTokenBorrower(msg.sender, request);
+    bondContractsManager.lendToETHBorrower{value: msg.value}(msg.sender, request);
   }
 }

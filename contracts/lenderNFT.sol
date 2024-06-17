@@ -7,8 +7,6 @@ import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 import './TestingHelper.sol';
 import './shared.sol';
 
-import "hardhat/console.sol";
-
 contract Lender is Bond, ReentrancyGuard {
   constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
 
@@ -50,23 +48,17 @@ contract Lender is Bond, ReentrancyGuard {
   }
 
   function _handleToken(TestingHelper helper, uint amountOwed, IERC20 borrowingTokenContract) internal {
-    console.log('token start');
     IERC20 collatralTokenContract = IERC20(collatralToken);
     if(amountOwed != 0) {
       uint tmp = helper.getAmountIn(collatralToken, ((borrowingToken == address(1)) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : borrowingToken), amountOwed);
-      console.log('action 1');
-      console.log(tmp, collatralTokenContract.balanceOf(address(this)));// output: 2322647 9483682
-
       bool status = collatralTokenContract.approve(address(helper), tmp);
       require(status, 'approve failed');
 
       if(borrowingToken != address(1)) {
         uint res = helper.swapTokenForToken(collatralToken, borrowingToken, tmp);
-        console.log('action 2a');
         require(res >= amountOwed, 'did not get required tokens from dex');
       } else {
         uint res = helper.swapTokenForETH(collatralToken, tmp);
-        console.log('action 2b');
         require(res >= amountOwed, 'did not get required tokens from dex');
         require(address(this).balance >= borrowingAmount, 'swap did not result in enough tokens');
       }
@@ -76,12 +68,10 @@ contract Lender is Bond, ReentrancyGuard {
       require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
       bool status1 = borrowingTokenContract.transfer(lender, borrowingAmount);
       bool status2 = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
-      console.log('action 3a');
       require(status1 && status2, 'transfer failed');
     } else {
       sendETHToLender(borrowingAmount);
       bool status = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
-      console.log('action 3b');
       require(status, 'transfer failed');
     }
   }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import '../tokenBank.sol';
+import '../priceOracleManager.sol';
 import '../shared.sol';
 import '../borrowerNFT.sol';
 import '../lenderNFT.sol';
@@ -11,13 +12,15 @@ contract BondContractsManager is HandlesETH {
   mapping(address => Borrower) public borrowerContracts;
   mapping(address => Lender) public lenderContracts;
   TokenBank immutable tokenBank;
+  PriceOracleManager immutable priceOracleManager; 
   RequestManager immutable requestManager;
   address immutable deployer;
   address bondManagerAddress;
   
-  constructor(address _tokenBank, address _requestManager) {
+  constructor(address _tokenBank, address _priceOracleManager, address _requestManager) {
     tokenBank = TokenBank(_tokenBank);
     requestManager = RequestManager(_requestManager);
+    priceOracleManager = PriceOracleManager(_priceOracleManager);
     deployer = msg.sender;
   }
   
@@ -49,18 +52,20 @@ contract BondContractsManager is HandlesETH {
     return address(lenderContracts[lender]);
   }
 
-  function lendToETHToTokenBorrower(address lender, bondRequest memory request) public payable {
+  function lendToTokenBorrower(address lender, bondRequest memory request) public {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
     int index = requestManager.indexOfBondRequest(request);
     require(index != -1, 'no bond request for this address');
-
+    
+    uint borrowedAmount = (priceOracleManager.getPrice(request.collatralAmount, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1, request.borrowingtoken) * request.borrowingPercentage) / 100;
+    
     lenderContracts[lender] = new Lender(
       request.borrower,
       lender,
       request.collatralToken,
       request.borrowingtoken,
       request.collatralAmount,
-      request.borrowingAmount,
+      borrowedAmount,
       request.durationInHours,
       request.intrestYearly
     );
@@ -70,25 +75,29 @@ contract BondContractsManager is HandlesETH {
       request.collatralToken,
       request.borrowingtoken,
       request.collatralAmount,
-      request.borrowingAmount,
+      borrowedAmount,
       request.durationInHours,
       request.intrestYearly
     );
 
     requestManager.deleteBondRequest(uint(index));
 
-    bool status = tokenBank.spendAllowedTokens(request.borrowingtoken, lender, address(borrowerContracts[request.borrower]), request.borrowingAmount); 
+    bool status = tokenBank.spendAllowedTokens(request.borrowingtoken, lender, address(borrowerContracts[request.borrower]), borrowedAmount); 
     require(status, 'transferFrom failed');
-    require(address(requestManager).balance >= request.collatralAmount, 'Contract does not have enough Ether');
-    require(request.collatralAmount > 0, 'ETHAmount should be greater than zero');
-    requestManager.sendFromBondContractsManager(payable(address(lenderContracts[lender])), request.collatralAmount);
+    if(request.collatralToken == address(1)) {
+      requestManager.sendFromBondContractsManager(payable(address(lenderContracts[lender])), request.collatralAmount);
+    } else {
+      bool status = requestManager.sendTokenFromBondContractsManager(request.collatralToken, request.borrower, address(lenderContracts[lender]), request.collatralAmount);
+      require(status, 'transfer failed');
+    }
   }
 
-  function lendToTokenToETHBorrower(address lender, bondRequest memory request) public payable {
+  function lendToETHBorrower(address lender, bondRequest memory request) public payable {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
     int index = requestManager.indexOfBondRequest(request);
     require(index != -1, 'no bond request for this address');
-    require(msg.value >= request.borrowingAmount, 'not enough ETH was sent');
+
+    uint borrowedAmount = (priceOracleManager.getPrice(request.collatralAmount, request.collatralToken, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1) * request.borrowingPercentage) / 100; 
 
     lenderContracts[lender] = new Lender(
       request.borrower,
@@ -96,7 +105,7 @@ contract BondContractsManager is HandlesETH {
       request.collatralToken,
       request.borrowingtoken,
       request.collatralAmount,
-      request.borrowingAmount,
+      borrowedAmount,
       request.durationInHours,
       request.intrestYearly
     );
@@ -106,46 +115,14 @@ contract BondContractsManager is HandlesETH {
       request.collatralToken,
       request.borrowingtoken,
       request.collatralAmount,
-      request.borrowingAmount,
+      borrowedAmount,
       request.durationInHours,
       request.intrestYearly
     );
     requestManager.deleteBondRequest(uint(index));
 
-    sendViaCall(payable(address(borrowerContracts[request.borrower])), request.borrowingAmount);
+    sendViaCall(payable(address(borrowerContracts[request.borrower])), borrowedAmount);
     bool status = requestManager.sendTokenFromBondContractsManager(request.collatralToken, request.borrower, address(lenderContracts[lender]), request.collatralAmount);
     require(status, 'transfer failed');
-  }
-
-  function lendToTokenToTokenBorrower(address lender, bondRequest memory request) public {
-    require(msg.sender == bondManagerAddress, 'users must use the bond manager');
-    int index = requestManager.indexOfBondRequest(request);
-    require(index != -1, 'no bond request for this address');
-
-    lenderContracts[lender] = new Lender(
-      request.borrower,
-      lender,
-      request.collatralToken,
-      request.borrowingtoken,
-      request.collatralAmount,
-      request.borrowingAmount,
-      request.durationInHours,
-      request.intrestYearly
-    );
-    borrowerContracts[request.borrower] = new Borrower(
-      request.borrower,
-      lender,
-      request.collatralToken,
-      request.borrowingtoken,
-      request.collatralAmount,
-      request.borrowingAmount,
-      request.durationInHours,
-      request.intrestYearly
-    );
-    requestManager.deleteBondRequest(uint(index));
-
-    bool status1 = tokenBank.spendAllowedTokens(request.borrowingtoken, lender, address(borrowerContracts[request.borrower]), request.borrowingAmount);
-    bool status2 = requestManager.sendTokenFromBondContractsManager(request.collatralToken, request.borrower, address(lenderContracts[lender]), request.collatralAmount);
-    require(status1 && status2, 'transferFrom failed');
   }
 }

@@ -3,8 +3,6 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import "hardhat/console.sol";
-
 struct allowanceEntry {
   address allower;
   address spender;
@@ -25,8 +23,8 @@ contract TokenBank {
          allowanceEntries[i].allower == allower &&
          allowanceEntries[i].token == token &&
          allowanceEntries[i].amount >= amount) {
-        found = true;
-        if(allowanceEntries[i].amount - amount < closestAmount) {
+        if(allowanceEntries[i].amount >= amount && !found || (allowanceEntries[i].amount - amount < closestAmount)) {
+          found = true;
           bestI = i;
           closestAmount = allowanceEntries[i].amount - amount;
         }
@@ -41,14 +39,12 @@ contract TokenBank {
     uint allowance = tokenContract.allowance(msg.sender, address(this));
     require(allowance >= amount, 'allowance is not high enough');
     allowanceEntries.push(allowanceEntry(msg.sender, spender, token, amount));
-    console.log(token, msg.sender, spender, amount);
     bool status = tokenContract.transferFrom(msg.sender, address(this), amount);
     require(status, 'transferFrom failed');
     return status; 
   }
 
   function spendAllowedTokens(address token, address allower, address to, uint amount) public returns (bool) {
-    console.log(token, allower, msg.sender, amount);
     uint index = findAllowanceEntryWithMinimumBalance(token, allower, msg.sender, amount);
     allowanceEntries[index].amount -= amount;
     if(allowanceEntries[index].amount == 0) delete allowanceEntries[index];
