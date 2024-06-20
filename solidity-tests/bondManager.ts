@@ -1,7 +1,12 @@
 import { ethers } from 'hardhat';
 const { expect } = require('chai');
+const fs = require('fs');
+let ABI;
 
-import ABI from '../constants/abi';
+async function readJSON(path: string) {
+  let data = await fs.readFileSync(`./${path}`);
+  return JSON.parse(data);
+}
 
 // these can have interfaces
 let bondManager: any;
@@ -19,17 +24,20 @@ let TokenToETHBorrowed = 0;
 let TokenToTokenBorrowed = 0;
 
 // initialization
+
+it('should get the contract ABIs', async() => {
+  ABI = await readJSON('constants/ABIs.json');
+});
+
 it('should deploy bond mamager', async() => {
-  tokenBank = await ethers.deployContract('TokenBank');
+  tokenBank  = await ethers.deployContract('TokenBank');
   let priceOracleManager = await ethers.deployContract('PriceOracleManager');
   let requestManager = await ethers.deployContract('RequestManager', [tokenBank.target, priceOracleManager.target]);
-  let bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, requestManager.target]); 
-  bondManager = await ethers.deployContract('BondManager', [requestManager.target, bondContractsManager.target, true]);
-  
+  let bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, requestManager.target]);
+  bondManager = await ethers.deployContract('BondManager', [requestManager.target, bondContractsManager.target, tokenBank.target, true]);
   let addr;
   [addr] = await ethers.getSigners();
-  
-  await requestManager.connect(addr).setAddresses(bondManager.target, bondContractsManager.target);
+  await requestManager.connect(addr).setAddress(bondManager.target, bondContractsManager.target);
   await bondContractsManager.connect(addr).setAddress(bondManager.target);
 });
 
@@ -111,8 +119,9 @@ it('should allow the user to cancel an ETH collatralized bond request', async() 
 it('should allow the borrower to withdraw some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
-  
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
+
+  let NFTs = await bondManager.connect(addr).getBorrowersIds();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(NFTs[0]);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
@@ -127,7 +136,8 @@ it('should allow the borrower to deposit some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
+  let NFTs = await bondManager.connect(addr).getBorrowersIds();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(NFTs[0]);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   let res = await(await WBTC.connect(addr).approve(address, BigInt(10 ** 5))).wait();
   
@@ -138,6 +148,7 @@ it('should allow the borrower to deposit some borrowed tokens', async() => {
   expect((amountA - amountB) == BigInt(10 ** 5)/BigInt(2));
   expect(res);
 });
+// end of testing identical functionality
 
 it('should allow the ETH to token bond to liquidate', async() => {
   let addr, other;
@@ -150,6 +161,10 @@ it('should allow the ETH to token bond to liquidate', async() => {
   if(upkeepNeeded) {
     res = await(await bondManager.connect(addr).performUpkeep(data)).wait();
   }
+  let NFTs = await bondManager.connect(other).getLendersIds();
+  let address = await bondManager.connect(addr).getAddressOfLenderContract(NFTs[0]);
+  let lender = new ethers.Contract(address, ABI.lender, ethers.provider);
+  lender.connect(other).withdawLentTokens();
   let amountB = await testingHelper.connect(other).getTokenBalance(WBTCAddress);
   
   expect((amountB - amountA) >= ETHToTokenBorrowed);
@@ -194,7 +209,8 @@ it('should allow the borrower to withdraw some ETH', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
+  let NFTs = await bondManager.connect(addr).getBorrowersIds();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(NFTs[0]);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await ethers.provider.getBalance(addr.address);
@@ -209,7 +225,8 @@ it('should allow the borrower to deposit some ETH', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(addr.address);
+  let NFTs = await bondManager.connect(addr).getBorrowersIds();
+  let address = await bondManager.connect(addr).getAddressOfBorrowerContract(NFTs[0]);
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await ethers.provider.getBalance(addr.address);
@@ -228,9 +245,13 @@ it('should allow the token to ETH bond to liquidate', async() => {
   [upkeepNeeded, data] = await bondManager.checkUpkeepWithNoCallData();
   
   let amountA = await ethers.provider.getBalance(other.address);// change this if it conflicts
-  if (upkeepNeeded) {
+  if(upkeepNeeded) {
     res = await(await bondManager.connect(addr).performUpkeep(data)).wait();
   }
+  let NFTs = await bondManager.connect(other).getLendersIds();
+  let address = await bondManager.connect(addr).getAddressOfLenderContract(NFTs[0]);
+  let lender = new ethers.Contract(address, ABI.lender, ethers.provider);
+  lender.connect(other).withdrawLentETH();
   let amountB = await ethers.provider.getBalance(other.address);
   
   expect((amountB - amountA) >= TokenToETHBorrowed);
@@ -320,6 +341,10 @@ it('should allow the token to token bond to liquidate', async() => {
   if(upkeepNeeded) {
     res = await(await bondManager.connect(addr).performUpkeep(data)).wait();
   }
+  let NFTs = await bondManager.connect(other).getLendersIds();
+  let address = await bondManager.connect(addr).getAddressOfLenderContract(NFTs[0]);
+  let lender = new ethers.Contract(address, ABI.lender, ethers.provider);
+  lender.connect(other).withdawLentTokens();
   let amountB = await testingHelper.connect(other).getTokenBalance(USDCAddress);
   
   expect((amountB - amountA) >= TokenToTokenBorrowed);

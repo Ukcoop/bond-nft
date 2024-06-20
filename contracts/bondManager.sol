@@ -9,22 +9,19 @@ import './shared.sol';
 import './bondManagerUtils/requestManager.sol';
 import './bondManagerUtils/bondContractsManager.sol';
 
-struct addressPair {
-  address borrower;
-  address lender;
-}
-
 contract BondManager is AutomationCompatibleInterface {
-  mapping(address => Borrower) public borrowerContracts;
-  mapping(address => Lender) public lenderContracts;
-  addressPair[] bondPairs;
   bool immutable testing;
   RequestManager immutable requestManager;
   BondContractsManager immutable bondContractsManager;
+  address immutable tokenBank;
 
-  constructor(address _requestManagerAddress, address _bondContractsManagerAddress, bool _testing) {
-    requestManager = RequestManager(_requestManagerAddress);
-    bondContractsManager = BondContractsManager(_bondContractsManagerAddress);
+  constructor(address _requestManager, address _bondContractsManager, address _tokenBank, bool _testing) {
+    require(_requestManager != address(0), 'requestManager address can not be 0');
+    require(_bondContractsManager != address(0), 'bondContractsManager address can not be 0');
+    require(_tokenBank != address(0), 'tokenBank address can not be 0');
+    requestManager = RequestManager(_requestManager);
+    bondContractsManager = BondContractsManager(_bondContractsManager);
+    tokenBank = _tokenBank;
     testing = _testing;
   }
 
@@ -34,6 +31,10 @@ contract BondManager is AutomationCompatibleInterface {
 
   function getBondContractsManagerAddress() public view returns (address) {
     return address(bondContractsManager);
+  }
+
+  function getTokenBankAddress() public view returns (address) {
+    return address(tokenBank);
   }
 
   function postETHToTokenbondRequest(
@@ -66,56 +67,41 @@ contract BondManager is AutomationCompatibleInterface {
     return requestManager.postTokenToTokenbondRequest(msg.sender, collatralToken, collatralAmount, borrowingToken, borrowingAmount, termInHours, intrestYearly);
   }
 
-  function getAddressOfBorrowerContract(address borrower) public view returns (address) {
-    return bondContractsManager.getAddressOfBorrowerContract(borrower);
+  function getBorrowersIds() public view returns (uint[] memory) {
+    return bondContractsManager.getBorrowersIds(msg.sender);
   }
 
-  function getAddressOfLenderContract(address lender) public view returns (address) {
-    return bondContractsManager.getAddressOfLenderContract(lender);
+  function getLendersIds() public view returns (uint[] memory) {
+    return bondContractsManager.getLendersIds(msg.sender);
   }
 
-  function liquidateFromBorrower(address borrower, address lender) public {
-    require(msg.sender == borrower, 'you are not authorized to do this action');
-    bondContractsManager.liquidate(borrower, lender);
+  function getAddressOfBorrowerContract(uint id) public view returns (address) {
+    return bondContractsManager.getAddressOfBorrowerContract(id);
   }
-  
-  // slither-disable-start costly-loop
-  function deleteBondPair(address borrower, address lender) internal {
-    uint index = 0;
-    uint len = bondPairs.length;
-    for(uint i = 0; i < len; i++) {
-      if(bondPairs[i].borrower == borrower && bondPairs[i].lender == lender) {
-        index = i;
-        break;
-      }
-    }
 
-    if(index >= len) {
-      bondPairs.pop();
-      return;
-    }
-
-    for(uint i = index; i < len - 1; i++) {
-      bondPairs[i] = bondPairs[i + 1];
-    }
-
-    bondPairs.pop();
+  function getAddressOfLenderContract(uint id) public view returns (address) {
+    return bondContractsManager.getAddressOfBorrowerContract(id);
   }
-  // slither-disable-end costly-loop
+
+//  function liquidateFromBorrower(uint borrowerId, uint lenderId) public {
+//    require(msg.sender == borrower, 'you are not authorized to do this action');
+//    bondContractsManager.liquidate(borrowerId, lenderId);
+//  }
 
   // slither-disable-start calls-loop
-  function liquidate(address borrower, address lender) internal {
-    bondContractsManager.liquidate(borrower, lender);
+  function liquidate(uint borrowerId, uint lenderId) internal {
+    bondContractsManager.liquidate(borrowerId, lenderId);
   }
   // slither-disable-end calls-loop
   
   function getRequiredLquidations() internal view returns (bool, bytes memory) {
     bool upkeepNeeded = false;
+    uintPair[] memory bondPairs = bondContractsManager.getBondPairs();
     uint len = bondPairs.length;
 
     for(uint i = 0; i < len; i++) {
-      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lender));
-      bool yes = testing || bondContractInstance.hasMatured();
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lenderId));
+      bool yes = testing || bondContractInstance.isUnderCollateralized() || bondContractInstance.hasMatured();
       if(yes) {
         upkeepNeeded = true;
       }
@@ -134,15 +120,15 @@ contract BondManager is AutomationCompatibleInterface {
   
   // slither-disable-start reentrancy-no-eth
   function performUpkeep(bytes calldata) external override {
+    uintPair[] memory bondPairs = bondContractsManager.getBondPairs();
     uint len = bondPairs.length;
     
     // slither-disable-start calls-loop
     for(uint i = 0; i < len; i++) {
-      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lender));
-      bool yes = testing || bondContractInstance.hasMatured();
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lenderId));
+      bool yes = testing || bondContractInstance.isUnderCollateralized() || bondContractInstance.hasMatured();
       if(yes) {
-        liquidate(bondPairs[i].borrower, bondPairs[i].lender);
-        deleteBondPair(bondPairs[i].borrower, bondPairs[i].lender);
+        liquidate(bondPairs[i].borrowerId, bondPairs[i].lenderId);
       }
     }
     // slither-disable-end calls-loop
@@ -166,12 +152,10 @@ contract BondManager is AutomationCompatibleInterface {
   }
 
   function lendToTokenBorrower(bondRequest memory request) public payable {
-    bondPairs.push(addressPair(request.borrower,msg.sender));
     bondContractsManager.lendToTokenBorrower(msg.sender, request); 
   }
 
   function lendToETHBorrower(bondRequest memory request) public payable {
-    bondPairs.push(addressPair(request.borrower,msg.sender));
     bondContractsManager.lendToETHBorrower{value: msg.value}(msg.sender, request);
   }
 }

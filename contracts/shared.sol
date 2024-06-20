@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+import './priceOracleManager.sol';
+
 struct getDataResponse {
-  address borrower;
-  address lender;
+  uint256 borrowerId;
+  uint256 lenderId;
   address collatralToken;
   address borrowingToken;
   uint256 collatralAmount;
@@ -12,10 +14,21 @@ struct getDataResponse {
   uint256 intrestYearly;
 }
 
+struct uintPair {
+  uint borrowerId;
+  uint lenderId;
+}
+
 interface BondInterface {
   function getData() external view returns (getDataResponse memory);
   function getOwed() external view returns (uint);
   function hasMatured() external view returns (bool);
+  function isUnderCollateralized() external view returns (bool);
+}
+
+interface NFTManagerInterface {
+  function getOwner(uint id) external view returns (address);
+  function getContractAddress(uint id) external view returns (address payable);
 }
 
 abstract contract HandlesETH {
@@ -34,44 +47,48 @@ abstract contract HandlesETH {
 }
 
 contract Bond {
-  address immutable borrower;
-  address immutable lender;
+  uint256 immutable borrowerId;
+  uint256 immutable lenderId;
   address immutable owner;
   address immutable collatralToken; // this will be address(1) for native eth
-  address immutable borrowingToken;
+  address immutable borrowingToken; // this will be address(1) for native eth
   uint256 immutable borrowingAmount;
   uint256 immutable collatralAmount;
   uint256 immutable durationInHours;
   uint256 immutable intrestYearly;
   uint256 immutable startTime;
+  PriceOracleManager immutable priceOracleManager;
+  NFTManagerInterface immutable lenderNFTManager;
+  NFTManagerInterface immutable borrowerNFTManager;
   //slither-disable-next-line immutable-states
   uint256 borrowed;
   bool liquidated;
 
-  constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) {
-    require(borrower1 != address(0), 'borrower address can not be address(0)');
-    require(lender1 != address(0), 'lender address can not be address(0)');
-    require(collatralToken1 != address(0), 'collatral token can not be address(0)');
-    require(borrowingToken1 != address(0), 'borrowing token can not be address(0)');
-    require(borrowingAmount1 != 0, 'cant borrow nothing');
-    require(durationInHours1 > 24, 'bond length is too short');
-    require(intrestYearly1 > 2 && intrestYearly1 < 15, 'intrest is not in this range: (2 to 15)%');
-    borrower = borrower1;
-    lender = lender1;
-    owner = msg.sender;
-    collatralToken = collatralToken1;
-    borrowingToken = borrowingToken1;
-    borrowingAmount = borrowingAmount1;
-    collatralAmount = collatralAmount1;
-    durationInHours = durationInHours1;
-    intrestYearly = intrestYearly1;
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address bondContractsManager, address _priceOracleManager, uint _borrowerId, uint _lenderId, address _collatralToken, address _borrowingToken, uint _borrowingAmount, uint _collatralAmount, uint _durationInHours, uint _intrestYearly) {
+    require(_collatralToken != address(0), 'collatral token can not be address(0)');
+    require(_borrowingToken != address(0), 'borrowing token can not be address(0)');
+    require(_borrowingAmount != 0, 'cant borrow nothing');
+    require(_durationInHours > 24, 'bond length is too short');
+    require(_intrestYearly > 2 && _intrestYearly < 15, 'intrest is not in this range: (2 to 15)%');
+    borrowerId = _borrowerId;
+    lenderId = _lenderId;
+    owner = bondContractsManager;
+    collatralToken = _collatralToken;
+    borrowingToken = _borrowingToken;
+    borrowingAmount = _borrowingAmount;
+    collatralAmount = _collatralAmount;
+    durationInHours = _durationInHours;
+    intrestYearly = _intrestYearly;
     startTime = block.timestamp;
+    lenderNFTManager = NFTManagerInterface(_lenderNFTManager);
+    borrowerNFTManager = NFTManagerInterface(_borrowerNFTManager);
+    priceOracleManager = PriceOracleManager(_priceOracleManager);
     liquidated = false;
     borrowed = 0;
   }
 
   function getData() public view returns (getDataResponse memory) {
-    return getDataResponse(borrower, lender, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
+    return getDataResponse(borrowerId, lenderId, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
   }
   
   // slither-disable-start timestamp
@@ -94,23 +111,28 @@ contract Bond {
   // slither-disable-end assembly
 
   function hasMatured() public view returns (bool) {
-    return ((block.timestamp - startTime) / 3600) >= durationInHours; 
+    return ((block.timestamp - startTime) / 3600) >= durationInHours;
   }
   // slither-disable-end timestamp
 
-
+  function isUnderCollateralized() public view returns (bool) {
+    if(borrowed == 0) return false;
+    uint collatralValue = priceOracleManager.getPrice(collatralAmount, (collatralToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : collatralToken),
+                                                                       (borrowingToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : borrowingToken));
+    return ((borrowed * 100) / (collatralValue * 100)) >= 90;
+  }
 
   // slither-disable-start low-level-calls
   // slither-disable-start arbitrary-send-eth
   function sendETHToBorrower(uint value) internal {
     require(value != 0, 'cannot send nothing');
-    (bool sent,) = payable(borrower).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
+    (bool sent,) = payable(borrowerNFTManager.getOwner(borrowerId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
     require(sent, 'Failed to send Ether');
   }
 
   function sendETHToLender(uint value) internal {
     require(value != 0, 'cannot send nothing');
-    (bool sent,) = payable(lender).call{value: value}('');// since the borrower variable is immutable and only set by the bondManager, this is a false positive
+    (bool sent,) = payable(lenderNFTManager.getOwner(lenderId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
     require(sent, 'Failed to send Ether');
   }
 

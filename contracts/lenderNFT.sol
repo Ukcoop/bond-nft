@@ -2,13 +2,88 @@
 pragma solidity ^0.8.20;
 
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import '@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol';
+import '@openzeppelin/contracts/access/Ownable.sol';
 import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 
+import './bondManagerUtils/requestManager.sol';
+import './bondManagerUtils/bondContractsManager.sol';
 import './TestingHelper.sol';
 import './shared.sol';
 
+contract LenderNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
+  mapping(uint => Lender) lenderContracts;
+  mapping(uint => bool) burned;
+  uint256 totalNFTs;
+
+  constructor() ERC721("bond NFT lender", "BNFTL") Ownable(msg.sender) {}
+
+  function getNextId() public returns (uint) {
+    for(uint i = 0; i < totalNFTs; i++) {
+      if(burned[i]) {
+        return i;
+      }
+    }
+    return totalNFTs++;
+  }
+
+  function getOwner(uint id) public view returns (address) {
+    return ownerOf(id);
+  }
+
+  function getContractAddress(uint id) public view returns (address payable) {
+    return payable(address(lenderContracts[id]));
+  }
+
+  function getIds(address lender) public view returns (uint[] memory) {
+    uint[] memory possibleIds = new uint[](totalNFTs);
+    uint index = 0;
+
+    for(uint i = 0; i < totalNFTs; i++) {
+      if(ownerOf(i) == lender) {
+        possibleIds[index] = i;
+        index++;
+      }
+    }
+
+    uint[] memory res = new uint[](index);
+    for(uint i = 0; i < index; i++) {
+      res[i] = possibleIds[i];
+    }
+
+    return res;
+  }
+
+  function createLenderContract(address borrowerNFTManager, address priceOracleManager, address lender, uint borrowerId, uint lenderId, uint borrowedAmount, bondRequest memory request) public onlyOwner {
+    lenderContracts[lenderId] = new Lender(
+      address(this),
+      borrowerNFTManager,
+      owner(),
+      priceOracleManager,
+      borrowerId,
+      lenderId,
+      request.collatralToken,
+      request.borrowingtoken,
+      request.collatralAmount,
+      borrowedAmount,
+      request.durationInHours,
+      request.intrestYearly
+    );
+
+    _safeMint(lender, lenderId);
+    burned[lenderId] = false;
+  }
+
+  function burnLenderContract(uint id) public onlyOwner {
+    _burn(id);
+    burned[id] = true;
+    delete lenderContracts[id];
+  }
+}
+
 contract Lender is Bond, ReentrancyGuard {
-  constructor(address borrower1, address lender1, address collatralToken1, address borrowingToken1, uint borrowingAmount1, uint collatralAmount1, uint durationInHours1, uint intrestYearly1) Bond(borrower1, lender1, collatralToken1, borrowingToken1, collatralAmount1, borrowingAmount1, durationInHours1, intrestYearly1) {}
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager, uint _borrowerId, uint _lenderId, address _collatralToken, address _borrowingToken, uint _borrowingAmount, uint _collatralAmount, uint _durationInHours, uint _intrestYearly) 
+  Bond(_lenderNFTManager, _borrowerNFTManager, _bondContractsManager, _priceOracleManager, _borrowerId, _lenderId, _collatralToken, _borrowingToken, _collatralAmount, _borrowingAmount, _durationInHours, _intrestYearly) {}
 
   receive() external payable {}
 
@@ -42,9 +117,7 @@ contract Lender is Bond, ReentrancyGuard {
       require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
     }
     
-    bool status = borrowingTokenContract.transfer(lender, borrowingAmount);
     sendETHToBorrower(address(this).balance);
-    require(status, 'transfer failed');
   }
 
   function _handleToken(TestingHelper helper, uint amountOwed, IERC20 borrowingTokenContract) internal {
@@ -66,22 +139,31 @@ contract Lender is Bond, ReentrancyGuard {
     
     if(borrowingToken != address(1)) {
       require(borrowingTokenContract.balanceOf(address(this)) >= borrowingAmount, 'swap did not result in enough tokens');
-      bool status1 = borrowingTokenContract.transfer(lender, borrowingAmount);
-      bool status2 = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
-      require(status1 && status2, 'transfer failed');
+      bool status = collatralTokenContract.transfer(borrowerNFTManager.getOwner(borrowerId), collatralTokenContract.balanceOf(address(this)));
+      require(status, 'transfer failed');
     } else {
-      sendETHToLender(borrowingAmount);
-      bool status = collatralTokenContract.transfer(borrower, collatralTokenContract.balanceOf(address(this)));
+      bool status = collatralTokenContract.transfer(borrowerNFTManager.getOwner(borrowerId), collatralTokenContract.balanceOf(address(this)));
       require(status, 'transfer failed');
     }
   }
 
   function withdawLentTokens() public {
-    require(msg.sender == lender, 'you are not the lender');
+    require(msg.sender == lenderNFTManager.getOwner(lenderId), 'you are not the lender');
     require(liquidated, 'this bond has not yet been liquidated');
 
     IERC20 tokenContract = IERC20(borrowingToken);
-    bool status = tokenContract.transfer(lender, tokenContract.balanceOf(address(this)));
+    BondContractsManager burn = BondContractsManager(owner);
+    bool status = tokenContract.transfer(lenderNFTManager.getOwner(lenderId), tokenContract.balanceOf(address(this)));
     require(status, 'withdraw failed');
+    burn.burnFromLender(lenderId);
+  }
+
+  function withdrawLentETH() public {
+    require(msg.sender == lenderNFTManager.getOwner(lenderId), 'you are not the lender');
+    require(liquidated, 'this bond has not yet been liquidated');
+
+    BondContractsManager burn = BondContractsManager(owner);
+    sendETHToLender(borrowingAmount);
+    burn.burnFromLender(lenderId);
   }
 }

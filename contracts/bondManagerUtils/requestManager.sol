@@ -52,11 +52,10 @@ contract RequestManager is HandlesETH {
     return false;
   }
 
-  function setAddresses(address bondManager, address bondContractsManager) public {
-    require(bondManager != address(0), 'bondManager address cant be address(0)');
+  function setAddress(address bondManager, address bondContractsManager) public {
+    require(bondManager != address(0), 'bondManager address can not be address(0)');
     require(bondContractsManager != address(0), 'bondContractsManager address cant be address(0)');
     require(msg.sender == deployer, 'only the deployer can do this action');
-    require(bondManagerAddress == address(0) && bondContractsManagerAddress == address(0), 'addresses allredy initialized');
     bondManagerAddress = bondManager;
     bondContractsManagerAddress = bondContractsManager;
   }
