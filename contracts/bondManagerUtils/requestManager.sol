@@ -5,24 +5,16 @@ import '../tokenBank.sol';
 import '../priceOracleManager.sol';
 import '../shared.sol';
 
-struct bondRequest {
-  address borrower;
-  address collatralToken;
-  uint256 collatralAmount;
-  address borrowingtoken;
-  uint256 borrowingPercentage;
-  uint256 durationInHours;
-  uint256 intrestYearly;
-}
+//AUDIT: can be optimized
 
 contract RequestManager is HandlesETH {
   address[] public whitelistedTokens;
-  bondRequest[] bondRequests;
-  TokenBank immutable tokenBank;
-  PriceOracleManager immutable priceOracleManager;  
-  address immutable deployer;
-  address bondManagerAddress;
-  address bondContractsManagerAddress;
+  bondRequest[] internal bondRequests;
+  TokenBank internal immutable tokenBank;
+  PriceOracleManager internal immutable priceOracleManager;  
+  address internal immutable deployer;
+  address internal bondManagerAddress;
+  address internal bondContractsManagerAddress;
   
   constructor(address _tokenBank, address _priceOracleManager) {
     whitelistedTokens = new address[](8);
@@ -44,7 +36,7 @@ contract RequestManager is HandlesETH {
 
   function isWhitelistedToken(address token) public view returns (bool) {
     uint len = whitelistedTokens.length; 
-    for (uint i = 0; i < len; i++) {
+    for (uint i; i < len; i++) {
       if (token == whitelistedTokens[i]) {
         return true;
       }
@@ -65,10 +57,9 @@ contract RequestManager is HandlesETH {
     sendViaCall(to, value);
   }
 
-  function sendTokenFromBondContractsManager(address token, address borrower, address to, uint value) public returns (bool) {
+  function sendTokenFromBondContractsManager(address token, address borrower, address to, uint value) public returns (bool status) {
     require(msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
-    bool status = tokenBank.spendAllowedTokens(token, borrower, to, value);
-    return status;
+    status = tokenBank.spendAllowedTokens(token, borrower, to, value);
   }
 
   function deleteBondRequest(uint index) public {
@@ -89,7 +80,7 @@ contract RequestManager is HandlesETH {
     uint percent = request.borrowingPercentage;
     uint full =  priceOracleManager.getPrice(request.collatralAmount,
                                       (request.collatralToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : request.collatralToken),
-                                      (request.borrowingtoken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : request.borrowingtoken));
+                                      (request.borrowingToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : request.borrowingToken));
     uint res = (full * percent) / 100;
     return res;
   }
@@ -97,11 +88,12 @@ contract RequestManager is HandlesETH {
   function postETHToTokenbondRequest(
     address borrower,
     address borrowingToken,
-    uint borrowingPercentage,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public payable returns (bool) {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
+    require(borrower != address(0), 'borrowr address can not be address(0)');
     require(msg.value != 0, 'cant post a bond with no collatral');
     require(isWhitelistedToken(borrowingToken), 'this token is not whitelisted');
     require(borrowingPercentage <= 80 && borrowingPercentage >= 20, 'borrowingPercentage is not in range: (20 to 80)%');
@@ -125,11 +117,12 @@ contract RequestManager is HandlesETH {
     address borrower,
     address collatralToken,
     uint collatralAmount,
-    uint borrowingPercentage,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public returns (bool) {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
+    require(borrower != address(0), 'borrowr address can not be address(0)');
     require(collatralAmount != 0, 'cant post a bond with no collatral');
     require(borrowingPercentage <= 80 && borrowingPercentage >= 20, 'borrowingPercentage is not in range: (20 to 80)%');
     require(isWhitelistedToken(collatralToken), 'this token is not whitelisted');
@@ -156,11 +149,12 @@ contract RequestManager is HandlesETH {
     address collatralToken,
     uint collatralAmount,
     address borrowingToken,
-    uint borrowingPercentage,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public returns (bool) {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
+    require(borrower != address(0), 'borrowr address can not be address(0)');
     require(collatralAmount != 0, 'cant post a bond with no collatral');
     require(isWhitelistedToken(collatralToken), 'this token is not whitelisted');
     require(isWhitelistedToken(borrowingToken), 'this token is not whitelisted');
@@ -191,7 +185,7 @@ contract RequestManager is HandlesETH {
         (bondRequests[i].borrower == request.borrower) &&
         (bondRequests[i].collatralToken == request.collatralToken) &&
         (bondRequests[i].collatralAmount == request.collatralAmount) &&
-        (bondRequests[i].borrowingtoken == request.borrowingtoken) &&
+        (bondRequests[i].borrowingToken == request.borrowingToken) &&
         (bondRequests[i].durationInHours == request.durationInHours) &&
         (bondRequests[i].intrestYearly == request.intrestYearly)
       );

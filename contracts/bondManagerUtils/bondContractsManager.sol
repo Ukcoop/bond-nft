@@ -11,19 +11,22 @@ import '../lenderNFT.sol';
 import './requestManager.sol';
 
 contract BondContractsManager is HandlesETH, ReentrancyGuard {
-  mapping(address => bool) lenderCanBurn;
-  LenderNFTManager immutable lenderNFTManager;
-  BorrowerNFTManager immutable borrowerNFTManager;
-  uintPair[] bondPairs;
-  TokenBank immutable tokenBank;
-  PriceOracleManager immutable priceOracleManager; 
-  RequestManager immutable requestManager;
-  address bondManagerAddress;
-  address immutable deployer;
+  mapping(uint32 => bool) internal lenderCanBurn;
+  mapping(uint => bondData) bondContractsData;
+  uint32 internal bondIds;
+  LenderNFTManager internal immutable lenderNFTManager;
+  BorrowerNFTManager internal immutable borrowerNFTManager;
+  uintPair[] internal bondPairs;
+  TokenBank internal immutable tokenBank;
+  PriceOracleManager internal immutable priceOracleManager; 
+  RequestManager internal immutable requestManager;
+  address internal bondManagerAddress;
+  address internal immutable deployer;
   
   constructor(address _tokenBank, address _priceOracleManager, address _requestManager) {
     lenderNFTManager = new LenderNFTManager();
-    borrowerNFTManager = new BorrowerNFTManager();
+    borrowerNFTManager = new BorrowerNFTManager(address(lenderNFTManager), _priceOracleManager);
+    lenderNFTManager.setAddress(address(borrowerNFTManager), _priceOracleManager);
     tokenBank = TokenBank(_tokenBank);
     requestManager = RequestManager(_requestManager);
     priceOracleManager = PriceOracleManager(_priceOracleManager);
@@ -43,11 +46,35 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
     return bondPairs;
   }
 
+  function getNextId() internal returns(uint32) {
+    uint32 len = bondIds;
+    for(uint32 i = 0; i < len; i++) {
+      // that is not a timestamp slither...
+      //slither-disable-next-line timestamp
+      if(bondContractsData[i].owner == address(0)) {
+        return i;
+      }
+    }
+    return bondIds++;
+  }
+
+  function createBond(uint32 bondId, uint32 borrowerId, uint32 lenderId, uint borrowedAmount, bondRequest memory request) internal {
+    bondContractsData[bondId] = bondData(borrowerId, lenderId, request.durationInHours, request.intrestYearly, uint32(block.timestamp), address(this), request.collatralToken, request.borrowingToken, request.collatralAmount, borrowedAmount, 0, borrowedAmount, false);
+  }
+
+  function getBondData(uint32 bondId) public view returns (bondData memory) {
+    return bondContractsData[bondId];
+  }
+
+  function setBondData(uint32 bondId, bondData memory data) public {
+    bondContractsData[bondId] = data;
+  } 
+
   // slither-disable-start costly-loop
-  function deleteBondPair(uint borrowerId, uint lenderId) internal {
+  function deleteBondPair(uint32 borrowerId, uint32 lenderId) internal {
     uint index = 0;
     uint len = bondPairs.length;
-    for(uint i = 0; i < len; i++) {
+    for(uint i; i < len; i++) {
       if(bondPairs[i].borrowerId == borrowerId && bondPairs[i].lenderId == lenderId) {
         index = i;
         break;
@@ -66,63 +93,69 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
     bondPairs.pop();
   }
   // slither-disable-end costly-loop
-  
-  function liquidate(uint borrowerId, uint lenderId) public {
+
+  function liquidate(uint32 borrowerId, uint32 lenderId) public {
     require(msg.sender == bondManagerAddress, 'you are not authorized to do this action');
     deleteBondPair(borrowerId, lenderId);
-    lenderCanBurn[lenderNFTManager.getContractAddress(lenderId)] = true;
-    Borrower borrower = Borrower(borrowerNFTManager.getContractAddress(borrowerId));
-    Lender lender = Lender(lenderNFTManager.getContractAddress(lenderId));
-    getDataResponse memory res = lender.getData();
+    lenderCanBurn[lenderId] = true;
+    Borrower borrower = Borrower(borrowerNFTManager.getContractAddress());
+    Lender lender = Lender(lenderNFTManager.getContractAddress());
+    getDataResponse memory res = lender.getData(lenderId);
     require(res.borrowerId == borrowerId, 'the lender does not have this address as the borrower');
-    borrower.liquidate(address(lender));
-    lender.liquidate();
+    borrower.liquidate(borrowerId, address(lender));
+    lender.liquidate(lenderId);
     borrowerNFTManager.burnBorrowerContract(borrowerId); 
   }
-
-  function burnFromLender(uint lenderId) public {
-    require(lenderCanBurn[msg.sender], 'lender can not burn');
+  
+  function burnFromLender(uint32 lenderId) public {
+    require(msg.sender == lenderNFTManager.getContractAddress(), 'you are not authorized to do this action');
+    require(lenderCanBurn[lenderId], 'lender can not burn');
     lenderNFTManager.burnLenderContract(lenderId); 
   }
 
-  function getBorrowersIds(address borrower) public view returns (uint[] memory) {
+  function getBorrowersIds(address borrower) public view returns (uint32[] memory) {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
     return borrowerNFTManager.getIds(borrower);
   }
 
-  function getLendersIds(address lender) public view returns (uint[] memory) {
+  function getLendersIds(address lender) public view returns (uint32[] memory) {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
     return lenderNFTManager.getIds(lender);
   }
 
-  function getAddressOfBorrowerContract(uint id) public view returns (address) {
-    return borrowerNFTManager.getContractAddress(id);
+  function getAddressOfBorrowerContract() public view returns (address) {
+    return borrowerNFTManager.getContractAddress();
   }
 
-  function getAddressOfLenderContract(uint id) public view returns (address) {
-    return lenderNFTManager.getContractAddress(id);
+  function getAddressOfLenderContract() public view returns (address) {
+    return lenderNFTManager.getContractAddress();
   }
 
   // slither-disable-start reentrancy-benign
+  // slither-disable-start reentrancy-no-eth
   function lendToTokenBorrower(address lender, bondRequest memory request) public nonReentrant {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
+    require(lender != address(0), 'lender address can not be address(0)');
     int index = requestManager.indexOfBondRequest(request);
     require(index != -1, 'no bond request for this address');
     
-    uint borrowedAmount = (priceOracleManager.getPrice(request.collatralAmount, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1, request.borrowingtoken) * request.borrowingPercentage) / 100;
-    uint lenderId = lenderNFTManager.getNextId();
-    uint borrowerId = borrowerNFTManager.getNextId();
+    uint borrowedAmount = requestManager.getRequiredAmountForRequest(request);
+    uint32 bondId = getNextId();
+    uint32 lenderId = lenderNFTManager.getNextId();
+    uint32 borrowerId = borrowerNFTManager.getNextId();
     bondPairs.push(uintPair(borrowerId, lenderId));
 
-    lenderNFTManager.createLenderContract(address(borrowerNFTManager), address(priceOracleManager), lender, borrowerId, lenderId, borrowedAmount, request);
-    borrowerNFTManager.createBorrowerCotract(address(lenderNFTManager), address(priceOracleManager), borrowerId, lenderId, borrowedAmount, request); 
+
+    createBond(bondId, borrowerId, lenderId, borrowedAmount, request);
+    lenderNFTManager.createLenderNFT(lender, bondId, lenderId);
+    borrowerNFTManager.createBorrowerNFT(request.borrower, bondId, borrowerId); 
 
     requestManager.deleteBondRequest(uint(index));
 
-    address lenderContractAddress = lenderNFTManager.getContractAddress(lenderId);
-    address borrowerContractAddress = borrowerNFTManager.getContractAddress(borrowerId);
+    address lenderContractAddress = lenderNFTManager.getContractAddress();
+    address borrowerContractAddress = borrowerNFTManager.getContractAddress();
 
-    bool status = tokenBank.spendAllowedTokens(request.borrowingtoken, lender, borrowerContractAddress, borrowedAmount); 
+    bool status = tokenBank.spendAllowedTokens(request.borrowingToken, lender, borrowerContractAddress, borrowedAmount); 
     require(status, 'transferFrom failed');
     if(request.collatralToken == address(1)) {
       requestManager.sendFromBondContractsManager(payable(lenderContractAddress), request.collatralAmount);
@@ -134,26 +167,39 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
 
   function lendToETHBorrower(address lender, bondRequest memory request) public payable nonReentrant {
     require(msg.sender == bondManagerAddress, 'users must use the bond manager');
+    require(lender != address(0), 'lender address can not be address(0)');
     int index = requestManager.indexOfBondRequest(request);
     require(index != -1, 'no bond request for this address');
 
-    uint borrowedAmount = (priceOracleManager.getPrice(request.collatralAmount, request.collatralToken, 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1) * request.borrowingPercentage) / 100; 
-
-    uint lenderId = lenderNFTManager.getNextId();
-    uint borrowerId = borrowerNFTManager.getNextId();
+    uint borrowedAmount = requestManager.getRequiredAmountForRequest(request);
+    uint32 bondId = getNextId();
+    uint32 lenderId = lenderNFTManager.getNextId();
+    uint32 borrowerId = borrowerNFTManager.getNextId();
     bondPairs.push(uintPair(borrowerId, lenderId));
 
-    lenderNFTManager.createLenderContract(address(borrowerNFTManager), address(priceOracleManager), lender, borrowerId, lenderId, borrowedAmount, request);
-    borrowerNFTManager.createBorrowerCotract(address(lenderNFTManager), address(priceOracleManager), borrowerId, lenderId, borrowedAmount, request);
+    createBond(bondId, borrowerId, lenderId, borrowedAmount, request);
+    lenderNFTManager.createLenderNFT(lender, bondId, lenderId);
+    borrowerNFTManager.createBorrowerNFT(request.borrower, bondId, borrowerId); 
 
     requestManager.deleteBondRequest(uint(index));
 
-    address lenderContractAddress = lenderNFTManager.getContractAddress(lenderId);
-    address borrowerContractAddress = borrowerNFTManager.getContractAddress(borrowerId);
+    address lenderContractAddress = lenderNFTManager.getContractAddress();
+    address borrowerContractAddress = borrowerNFTManager.getContractAddress();
 
     sendViaCall(payable(borrowerContractAddress), borrowedAmount);
     bool status = requestManager.sendTokenFromBondContractsManager(request.collatralToken, request.borrower, lenderContractAddress, request.collatralAmount);
     require(status, 'transfer failed');
   }
   // slither-disable-end reentrancy-benign
+  // slither-disable-end reentrancy-no-eth
+
+  function withdrawLentTokens(address lender, uint32 id) public {
+    Lender lenderContract = Lender(lenderNFTManager.getContractAddress());
+    lenderContract.withdrawLentTokens(lender, id);
+  }
+
+  function withdrawLentETH(address lender, uint32 id) public {
+    Lender lenderContract = Lender(lenderNFTManager.getContractAddress());
+    lenderContract.withdrawLentETH(lender, id);
+  }
 }

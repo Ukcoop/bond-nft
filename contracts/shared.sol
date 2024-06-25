@@ -2,21 +2,48 @@
 pragma solidity ^0.8.20;
 
 import './priceOracleManager.sol';
+import './bondManagerUtils/bondContractsManager.sol';
 
 struct getDataResponse {
-  uint256 borrowerId;
-  uint256 lenderId;
+  uint32 borrowerId;
+  uint32 lenderId;
   address collatralToken;
   address borrowingToken;
   uint256 collatralAmount;
   uint256 borrowingAmount;
-  uint256 durationInHours;
-  uint256 intrestYearly;
+  uint32 durationInHours;
+  uint32 intrestYearly;
 }
 
 struct uintPair {
-  uint borrowerId;
-  uint lenderId;
+  uint32 borrowerId;
+  uint32 lenderId;
+}
+
+struct bondRequest {
+  address borrower;
+  address collatralToken;
+  uint256 collatralAmount;
+  address borrowingToken;
+  uint32 borrowingPercentage;
+  uint32 durationInHours;
+  uint32 intrestYearly;
+}
+
+struct bondData {
+  uint32 borrowerId;
+  uint32 lenderId;
+  uint32 durationInHours;
+  uint32 intrestYearly;
+  uint32 startTime;
+  address owner;
+  address collatralToken; // this will be address(1) for native eth
+  address borrowingToken; // this will be address(1) for native eth
+  uint256 collatralAmount;
+  uint256 borrowingAmount;
+  uint256 borrowed;
+  uint256 total;
+  bool liquidated;
 }
 
 interface BondInterface {
@@ -27,8 +54,8 @@ interface BondInterface {
 }
 
 interface NFTManagerInterface {
-  function getOwner(uint id) external view returns (address);
-  function getContractAddress(uint id) external view returns (address payable);
+  function getOwner(uint32 id) external view returns (address);
+  function getContractAddress() external view returns (address payable);
 }
 
 abstract contract HandlesETH {
@@ -47,57 +74,45 @@ abstract contract HandlesETH {
 }
 
 contract Bond {
-  uint256 immutable borrowerId;
-  uint256 immutable lenderId;
-  address immutable owner;
-  address immutable collatralToken; // this will be address(1) for native eth
-  address immutable borrowingToken; // this will be address(1) for native eth
-  uint256 immutable borrowingAmount;
-  uint256 immutable collatralAmount;
-  uint256 immutable durationInHours;
-  uint256 immutable intrestYearly;
-  uint256 immutable startTime;
-  PriceOracleManager immutable priceOracleManager;
-  NFTManagerInterface immutable lenderNFTManager;
-  NFTManagerInterface immutable borrowerNFTManager;
-  //slither-disable-next-line immutable-states
-  uint256 borrowed;
-  bool liquidated;
+  mapping(uint32 => uint32) internal toBondId;
+  PriceOracleManager internal immutable priceOracleManager;
+  NFTManagerInterface internal immutable lenderNFTManager;
+  NFTManagerInterface internal immutable borrowerNFTManager;
+  BondContractsManager immutable owner;  
 
-  constructor(address _lenderNFTManager, address _borrowerNFTManager, address bondContractsManager, address _priceOracleManager, uint _borrowerId, uint _lenderId, address _collatralToken, address _borrowingToken, uint _borrowingAmount, uint _collatralAmount, uint _durationInHours, uint _intrestYearly) {
-    require(_collatralToken != address(0), 'collatral token can not be address(0)');
-    require(_borrowingToken != address(0), 'borrowing token can not be address(0)');
-    require(_borrowingAmount != 0, 'cant borrow nothing');
-    require(_durationInHours > 24, 'bond length is too short');
-    require(_intrestYearly > 2 && _intrestYearly < 15, 'intrest is not in this range: (2 to 15)%');
-    borrowerId = _borrowerId;
-    lenderId = _lenderId;
-    owner = bondContractsManager;
-    collatralToken = _collatralToken;
-    borrowingToken = _borrowingToken;
-    borrowingAmount = _borrowingAmount;
-    collatralAmount = _collatralAmount;
-    durationInHours = _durationInHours;
-    intrestYearly = _intrestYearly;
-    startTime = block.timestamp;
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager) {
     lenderNFTManager = NFTManagerInterface(_lenderNFTManager);
     borrowerNFTManager = NFTManagerInterface(_borrowerNFTManager);
     priceOracleManager = PriceOracleManager(_priceOracleManager);
-    liquidated = false;
-    borrowed = 0;
+    owner = BondContractsManager(_bondContractsManager);
   }
 
-  function getData() public view returns (getDataResponse memory) {
-    return getDataResponse(borrowerId, lenderId, collatralToken, borrowingToken, collatralAmount, borrowingAmount, durationInHours, intrestYearly);
+  function setBondId(uint32 bondId, uint32 nftId) public {
+    require(msg.sender == address(lenderNFTManager) || msg.sender == address(borrowerNFTManager), ' you are not authorized to do this action');
+    toBondId[nftId] = bondId; 
+  }
+
+  function getBondData(uint32 id) internal view returns(bondData memory) {
+    return owner.getBondData(toBondId[id]);
+  }
+
+  function setBondData(uint32 id, bondData memory data) internal {
+    owner.setBondData(toBondId[id], data);
+  }
+
+  function getData(uint32 id) public view returns (getDataResponse memory) {
+    bondData memory data = getBondData(id);
+    return getDataResponse(data.borrowerId, data.lenderId, data.collatralToken, data.borrowingToken, data.collatralAmount, data.borrowingAmount, data.durationInHours, data.intrestYearly);
   }
   
   // slither-disable-start timestamp
   // slither-disable-start divide-before-multiply
   // slither-disable-start assembly
-  function getOwed() public view returns (uint owed) {
-    uint start = startTime;
-    uint intrest = intrestYearly;
-    uint borrowing = borrowingAmount;
+  function getOwed(uint32 id) public view returns (uint owed) { // this might not be working correctly, need more resolution on the intrest.
+    bondData memory data = getBondData(id);
+    uint start = data.startTime;
+    uint intrest = data.intrestYearly;
+    uint borrowing = data.borrowingAmount;
     assembly {
       let currentTime := timestamp()
       let elapsedTime := div(sub(currentTime, start), 3600)
@@ -110,29 +125,33 @@ contract Bond {
   // slither-disable-end divide-before-multiply
   // slither-disable-end assembly
 
-  function hasMatured() public view returns (bool) {
-    return ((block.timestamp - startTime) / 3600) >= durationInHours;
+  function hasMatured(uint32 id) public view returns (bool) {
+    bondData memory data = getBondData(id);
+    return ((block.timestamp - data.startTime) / 3600) >= data.durationInHours;
   }
   // slither-disable-end timestamp
 
-  function isUnderCollateralized() public view returns (bool) {
-    if(borrowed == 0) return false;
-    uint collatralValue = priceOracleManager.getPrice(collatralAmount, (collatralToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : collatralToken),
-                                                                       (borrowingToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : borrowingToken));
-    return ((borrowed * 100) / (collatralValue * 100)) >= 90;
+  function isUnderCollateralized(uint32 id) public view returns (bool) {
+    bondData memory data = getBondData(id);
+    if(data.borrowed == 0) return false;
+    uint collatralValue = priceOracleManager.getPrice(data.collatralAmount, (data.collatralToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : data.collatralToken),
+                                                                       (data.borrowingToken == address(1) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : data.borrowingToken));
+    return ((data.borrowed * 100) / (collatralValue * 100)) >= 90;
   }
 
   // slither-disable-start low-level-calls
   // slither-disable-start arbitrary-send-eth
-  function sendETHToBorrower(uint value) internal {
+  function sendETHToBorrower(uint32 id, uint value) internal {
+    bondData memory data = getBondData(id);
     require(value != 0, 'cannot send nothing');
-    (bool sent,) = payable(borrowerNFTManager.getOwner(borrowerId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
+    (bool sent,) = payable(borrowerNFTManager.getOwner(data.borrowerId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
     require(sent, 'Failed to send Ether');
   }
 
-  function sendETHToLender(uint value) internal {
+  function sendETHToLender(uint32 id, uint value) internal {
+    bondData memory data = getBondData(id);
     require(value != 0, 'cannot send nothing');
-    (bool sent,) = payable(lenderNFTManager.getOwner(lenderId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
+    (bool sent,) = payable(lenderNFTManager.getOwner(data.lenderId)).call{value: value}('');// the owner of the nft is the only address that this function will send eth to.
     require(sent, 'Failed to send Ether');
   }
 

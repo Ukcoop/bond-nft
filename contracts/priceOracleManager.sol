@@ -14,7 +14,7 @@ struct oraclePair {
 }
 
 contract PriceOracleManager {
-  mapping(bytes32 => address) oracles;
+  mapping(bytes32 => address) internal oracles;
 
   function getOracleKey(address addressA, address addressB) public pure returns (bytes32) {
     return keccak256(abi.encodePacked(addressA, addressB));
@@ -68,12 +68,10 @@ contract PriceOracleManager {
 
 
 
-  function getPrice(uint amount, address addressA, address addressB) public view returns (uint) {
+  function getPrice(uint amount, address addressA, address addressB) public view returns (uint price) {
     if(isConstant(addressA, addressB)) {
       return (10 ** IERC20Metadata(addressB).decimals()); 
     }
-
-    uint price = 0;
 
     if(needsInversed(addressA, addressB)) {
       price = getInversedPrice(amount, addressA, addressB);
@@ -81,7 +79,5 @@ contract PriceOracleManager {
       Ioracle oracle = Ioracle(oracles[getOracleKey(addressA, addressB)]);
       price = toERC20Decimals(uint(oracle.latestAnswer()), oracle.decimals(), IERC20Metadata(addressB).decimals());
     }
-
-    return price;
   }
 }

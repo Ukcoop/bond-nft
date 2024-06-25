@@ -3,17 +3,17 @@ pragma solidity ^0.8.20;
 
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 
-import './borrowerNFT.sol';
+//import './borrowerNFT.sol';
 import './lenderNFT.sol';
 import './shared.sol';
 import './bondManagerUtils/requestManager.sol';
 import './bondManagerUtils/bondContractsManager.sol';
 
 contract BondManager is AutomationCompatibleInterface {
-  bool immutable testing;
-  RequestManager immutable requestManager;
-  BondContractsManager immutable bondContractsManager;
-  address immutable tokenBank;
+  bool internal immutable testing;
+  RequestManager internal immutable requestManager;
+  BondContractsManager internal immutable bondContractsManager;
+  address internal immutable tokenBank;
 
   constructor(address _requestManager, address _bondContractsManager, address _tokenBank, bool _testing) {
     require(_requestManager != address(0), 'requestManager address can not be 0');
@@ -39,75 +39,69 @@ contract BondManager is AutomationCompatibleInterface {
 
   function postETHToTokenbondRequest(
     address borrowingToken,
-    uint borrowingAmount,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public payable returns (bool) {
-    return requestManager.postETHToTokenbondRequest{value: msg.value}(msg.sender, borrowingToken, borrowingAmount, termInHours, intrestYearly);
+    return requestManager.postETHToTokenbondRequest{value: msg.value}(msg.sender, borrowingToken, borrowingPercentage, termInHours, intrestYearly);
   }
 
   function postTokenToETHBondRequest(
     address collatralToken,
     uint collatralAmount,
-    uint borrowingAmount,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public returns (bool) {
-    return requestManager.postTokenToETHBondRequest(msg.sender, collatralToken, collatralAmount, borrowingAmount, termInHours, intrestYearly);
+    return requestManager.postTokenToETHBondRequest(msg.sender, collatralToken, collatralAmount, borrowingPercentage, termInHours, intrestYearly);
   }
 
   function postTokenToTokenbondRequest(
     address collatralToken,
     uint collatralAmount,
     address borrowingToken,
-    uint borrowingAmount,
-    uint termInHours,
-    uint intrestYearly
+    uint32 borrowingPercentage,
+    uint32 termInHours,
+    uint32 intrestYearly
   ) public returns (bool) {
-    return requestManager.postTokenToTokenbondRequest(msg.sender, collatralToken, collatralAmount, borrowingToken, borrowingAmount, termInHours, intrestYearly);
+    return requestManager.postTokenToTokenbondRequest(msg.sender, collatralToken, collatralAmount, borrowingToken, borrowingPercentage, termInHours, intrestYearly);
   }
 
-  function getBorrowersIds() public view returns (uint[] memory) {
+  function getBorrowersIds() public view returns (uint32[] memory) {
     return bondContractsManager.getBorrowersIds(msg.sender);
   }
 
-  function getLendersIds() public view returns (uint[] memory) {
+  function getLendersIds() public view returns (uint32[] memory) {
     return bondContractsManager.getLendersIds(msg.sender);
   }
 
-  function getAddressOfBorrowerContract(uint id) public view returns (address) {
-    return bondContractsManager.getAddressOfBorrowerContract(id);
+  function getAddressOfBorrowerContract() public view returns (address) {
+    return bondContractsManager.getAddressOfBorrowerContract();
   }
 
-  function getAddressOfLenderContract(uint id) public view returns (address) {
-    return bondContractsManager.getAddressOfBorrowerContract(id);
+  function getAddressOfLenderContract() public view returns (address) {
+    return bondContractsManager.getAddressOfBorrowerContract();
   }
-
-//  function liquidateFromBorrower(uint borrowerId, uint lenderId) public {
-//    require(msg.sender == borrower, 'you are not authorized to do this action');
-//    bondContractsManager.liquidate(borrowerId, lenderId);
-//  }
 
   // slither-disable-start calls-loop
-  function liquidate(uint borrowerId, uint lenderId) internal {
+  function liquidate(uint32 borrowerId, uint32 lenderId) internal {
     bondContractsManager.liquidate(borrowerId, lenderId);
   }
   // slither-disable-end calls-loop
   
-  function getRequiredLquidations() internal view returns (bool, bytes memory) {
-    bool upkeepNeeded = false;
+  function getRequiredLquidations() internal view returns (bool upkeepNeeded, bytes memory data) {
+    upkeepNeeded = false;
+    data = bytes('');
     uintPair[] memory bondPairs = bondContractsManager.getBondPairs();
     uint len = bondPairs.length;
 
-    for(uint i = 0; i < len; i++) {
-      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lenderId));
+    for(uint i; i < len; i++) {
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract());
       bool yes = testing || bondContractInstance.isUnderCollateralized() || bondContractInstance.hasMatured();
       if(yes) {
         upkeepNeeded = true;
       }
     }
-
-    return (upkeepNeeded, bytes(''));
   }
 
   function checkUpkeepWithNoCallData() public view returns (bool, bytes memory) {
@@ -124,8 +118,8 @@ contract BondManager is AutomationCompatibleInterface {
     uint len = bondPairs.length;
     
     // slither-disable-start calls-loop
-    for(uint i = 0; i < len; i++) {
-      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract(bondPairs[i].lenderId));
+    for(uint i; i < len; i++) {
+      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract());
       bool yes = testing || bondContractInstance.isUnderCollateralized() || bondContractInstance.hasMatured();
       if(yes) {
         liquidate(bondPairs[i].borrowerId, bondPairs[i].lenderId);
@@ -157,5 +151,13 @@ contract BondManager is AutomationCompatibleInterface {
 
   function lendToETHBorrower(bondRequest memory request) public payable {
     bondContractsManager.lendToETHBorrower{value: msg.value}(msg.sender, request);
+  }
+
+  function withdrawLentTokens(uint32 id) public {
+    bondContractsManager.withdrawLentTokens(msg.sender, id);
+  }
+
+  function withdrawLentETH(uint32 id) public {
+    bondContractsManager.withdrawLentETH(msg.sender, id);
   }
 }
