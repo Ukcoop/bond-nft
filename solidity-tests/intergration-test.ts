@@ -9,11 +9,14 @@ async function readJSON(path: string) {
 }
 
 let bondManager: any;
+let requestManager: any;
+let bondContractsManager: any;
 let tokenBank: any;
 let testingHelper: any;
 let WBTC: any;
 let USDC: any;
 
+const ETHAddress = '0x0000000000000000000000000000000000000001';
 const WETHAddress = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 const WBTCAddress = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
 const USDCAddress = '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8';
@@ -31,8 +34,8 @@ it('should get the contract ABIs', async() => {
 it('should deploy bond mamager', async() => {
   tokenBank  = await ethers.deployContract('TokenBank');
   let priceOracleManager = await ethers.deployContract('PriceOracleManager');
-  let requestManager = await ethers.deployContract('RequestManager', [tokenBank.target, priceOracleManager.target]);
-  let bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, requestManager.target]);
+  requestManager = await ethers.deployContract('RequestManager', [tokenBank.target, priceOracleManager.target]);
+  bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, requestManager.target]);
   bondManager = await ethers.deployContract('BondManager', [requestManager.target, bondContractsManager.target, tokenBank.target, true]);
   let addr;
   [addr] = await ethers.getSigners();
@@ -58,7 +61,7 @@ it('should allow the user to post a ETH to token bond request with WBTC as the b
   [addr] = await ethers.getSigners();
   
   let amountA = await ethers.provider.getBalance(addr.address);
-  let res = await(await bondManager.connect(addr).postETHToTokenbondRequest(WBTCAddress, 80, 168, 5, {value: BigInt(1 * 10 ** 18)})).wait();
+  let res = await(await requestManager.connect(addr).postBondRequest(ETHAddress, BigInt(1 * 10 ** 18), WBTCAddress, 80, 168, 5, {value: BigInt(1 * 10 ** 18)})).wait();
   let amountB = await ethers.provider.getBalance(addr.address);
   
   expect(amountA - amountB >= BigInt(1 * 10 ** 18)).to.equal(true);
@@ -69,7 +72,7 @@ it('should allow the user to post another ETH to token bond request with WBTC as
   [addr] = await ethers.getSigners();
   
   let amountA = await ethers.provider.getBalance(addr.address);
-  let res = await(await bondManager.connect(addr).postETHToTokenbondRequest(WBTCAddress, 80, 168, 5, {value: BigInt(1 * 10 ** 18)})).wait();
+  let res = await(await requestManager.connect(addr).postBondRequest(ETHAddress, BigInt(1 * 10 ** 18), WBTCAddress, 80, 168, 5, {value: BigInt(1 * 10 ** 18)})).wait();
   let amountB = await ethers.provider.getBalance(addr.address);
   
   expect(amountA - amountB >= BigInt(1 * 10 ** 18)).to.equal(true);
@@ -79,8 +82,8 @@ it('should allow another user to supply their WBTC for the loan', async() => {
   let other;
   [, other] = await ethers.getSigners();
   
-  let res1 = await bondManager.getBondRequests();
-  let amountRequired = await bondManager.getRequiredAmountForRequest([...res1[1]]); 
+  let res1 = await requestManager.getBondRequests();
+  let amountRequired = await requestManager.getRequiredAmountForRequest([...res1[1]]);
   // tests that use the testingHelper will fail if it's not working properly so its ok to not check the change in the balance
   let input = await testingHelper.getAmountIn(WETHAddress, WBTCAddress, amountRequired + (amountRequired / BigInt(10)));
   await(await testingHelper.connect(other).swapETHforToken(WBTCAddress, {value: input})).wait();
@@ -89,7 +92,7 @@ it('should allow another user to supply their WBTC for the loan', async() => {
   let bondContractsManagerAddress = await bondManager.getBondContractsManagerAddress();
   let res = await(await WBTC.connect(other).approve(tokenBank.target, amountRequired)).wait();
   res = await(await tokenBank.connect(other).giveAddressAccessToToken(WBTCAddress, bondContractsManagerAddress, amountRequired)).wait();
-  res = await(await bondManager.connect(other).lendToTokenBorrower([...res1[1]])).wait();
+  res = await(await bondContractsManager.connect(other).lendToBorrower([...res1[1]])).wait();
   let amountB = await testingHelper.connect(other).getTokenBalance(WBTCAddress);
   
   ETHToTokenLent = (amountB - amountA);
@@ -99,10 +102,10 @@ it('should allow the user to cancel an ETH collatralized bond request', async() 
   let addr;
   [addr] = await ethers.getSigners();
   
-  let res1 = await bondManager.getBondRequests();
+  let res1 = await requestManager.getBondRequests();
   
   let amountA = await ethers.provider.getBalance(addr.address);
-  let res = await(await bondManager.connect(addr).cancelETHCollatralizedBondRequest([...res1[0]])).wait();
+  let res = await(await requestManager.connect(addr).cancelBondRequest([...res1[0]])).wait();
   let amountB = await ethers.provider.getBalance(addr.address);
   
   expect((amountB - amountA) >= BigInt(1 * 10 ** 18) - (BigInt(1 * 10 ** 18) / BigInt(1000))).to.equal(true);
@@ -113,12 +116,12 @@ it('should allow the borrower to withdraw some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
 
-  let NFTs = await bondManager.connect(addr).getBorrowersIds();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let NFTs = await bondContractsManager.connect(addr).getBorrowersIds();
+  let address = await bondContractsManager.connect(addr).getAddressOfBorrowerContract();
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
-  let res = await(await borrower.connect(addr).withdrawBorrowedTokens(NFTs[0], BigInt(10 ** 5))).wait();
+  let res = await(await borrower.connect(addr).withdraw(NFTs[0], BigInt(10 ** 5))).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect((amountB - amountA) == BigInt(10 ** 5)).to.equal(true);
@@ -128,13 +131,13 @@ it('should allow the borrower to deposit some borrowed tokens', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let NFTs = await bondManager.connect(addr).getBorrowersIds();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let NFTs = await bondContractsManager.connect(addr).getBorrowersIds();
+  let address = await bondContractsManager.connect(addr).getAddressOfBorrowerContract();
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   let res = await(await WBTC.connect(addr).approve(address, BigInt(10 ** 5))).wait();
   
   let amountA = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
-  res = await(await borrower.connect(addr).depositBorrowedTokens(NFTs[0], BigInt(10 ** 5)/BigInt(2))).wait();
+  res = await(await borrower.connect(addr).deposit(NFTs[0], BigInt(10 ** 5)/BigInt(2))).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect((amountA - amountB) == BigInt(10 ** 5)/BigInt(2)).to.equal(true);
@@ -152,8 +155,8 @@ it('should allow the ETH to token bond to liquidate', async() => {
   if(upkeepNeeded) {
     res = await(await bondManager.connect(addr).performUpkeep(data)).wait();
   }
-  let NFTs = await bondManager.connect(other).getLendersIds();
-  await bondManager.connect(other).withdrawLentTokens(NFTs[0]);
+  let NFTs = await bondContractsManager.connect(other).getLendersIds();
+  await bondContractsManager.connect(other).withdraw(NFTs[0]);
   let amountB = await testingHelper.connect(other).getTokenBalance(WBTCAddress);
   
   expect((amountB - amountA) >= ETHToTokenLent).to.equal(true);
@@ -170,7 +173,7 @@ it('should allow the user to post a token to ETH bond request with WBTC as colla
   let requestManagerAddress = await bondManager.connect(addr).getRequestManagerAddress();
   let res = await(await WBTC.connect(addr).approve(tokenBank.target, amountA)).wait();
   res = await(await tokenBank.connect(addr).giveAddressAccessToToken(WBTCAddress, requestManagerAddress, amountA)).wait();
-  res = await(await bondManager.connect(addr).postTokenToETHBondRequest(WBTCAddress, amountA, 80, 168, 5)).wait();
+  res = await(await requestManager.connect(addr).postBondRequest(WBTCAddress, amountA, ETHAddress, 80, 168, 5)).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect(amountA - amountB).to.equal(amountA); 
@@ -180,11 +183,11 @@ it('should allow another user to supply their ETH for the loan', async() => {
   let other;
   [, other] = await ethers.getSigners();
   
-  let res1 = await bondManager.getBondRequests();
-  let amountRequired = await bondManager.getRequiredAmountForRequest([...res1[0]]); 
+  let res1 = await requestManager.getBondRequests();
+  let amountRequired = await requestManager.getRequiredAmountForRequest([...res1[0]]); 
   
   let amountA = await ethers.provider.getBalance(other.address);  
-  let res = await(await bondManager.connect(other).lendToETHBorrower([...res1[0]], {value: amountRequired})).wait();
+  let res = await(await bondContractsManager.connect(other).lendToBorrower([...res1[0]], {value: amountRequired})).wait();
   let amountB = await ethers.provider.getBalance(other.address);
 
   TokenToETHLent = (amountA - amountB);
@@ -194,12 +197,12 @@ it('should allow the borrower to withdraw some ETH', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let NFTs = await bondManager.connect(addr).getBorrowersIds();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let NFTs = await bondContractsManager.connect(addr).getBorrowersIds();
+  let address = await bondContractsManager.connect(addr).getAddressOfBorrowerContract();
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await ethers.provider.getBalance(addr.address);
-  let res = await(await borrower.connect(addr).withdrawBorrowedETH(NFTs[0], BigInt(1 * 10 ** 18))).wait();
+  let res = await(await borrower.connect(addr).withdraw(NFTs[0], BigInt(1 * 10 ** 18))).wait();
   let amountB = await ethers.provider.getBalance(addr.address);
   
   expect((amountB - amountA) >= BigInt(1 * 10 ** 18) - (BigInt(1 * 10 ** 18) / BigInt(1000))).to.equal(true);
@@ -209,12 +212,12 @@ it('should allow the borrower to deposit some ETH', async() => {
   let addr;
   [addr] = await ethers.getSigners();
   
-  let NFTs = await bondManager.connect(addr).getBorrowersIds();
-  let address = await bondManager.connect(addr).getAddressOfBorrowerContract();
+  let NFTs = await bondContractsManager.connect(addr).getBorrowersIds();
+  let address = await bondContractsManager.connect(addr).getAddressOfBorrowerContract();
   let borrower = new ethers.Contract(address, ABI.borrower, ethers.provider);
   
   let amountA = await ethers.provider.getBalance(addr.address);
-  let res = await(await borrower.connect(addr).depositBorrowedETH(NFTs[0], {value: BigInt(5 * 10 ** 17)})).wait();
+  let res = await(await borrower.connect(addr).deposit(NFTs[0], BigInt(5 * 10 ** 17), {value: BigInt(5 * 10 ** 17)})).wait();
   let amountB = await ethers.provider.getBalance(addr.address);
   
   expect((amountA - amountB) >= BigInt(5 * 10 ** 17)).to.equal(true);
@@ -231,8 +234,8 @@ it('should allow the token to ETH bond to liquidate', async() => {
   if(upkeepNeeded) {
     res = await(await bondManager.connect(addr).performUpkeep(data)).wait();
   }
-  let NFTs = await bondManager.connect(other).getLendersIds();
-  await bondManager.connect(other).withdrawLentETH(0);
+  let NFTs = await bondContractsManager.connect(other).getLendersIds();
+  await bondContractsManager.connect(other).withdraw(0);
   let amountB = await ethers.provider.getBalance(other.address);
   
   expect((amountB - amountA) >= TokenToETHLent - (TokenToETHLent / BigInt(1000))).to.equal(true);
@@ -250,7 +253,7 @@ it('should allow the user to post a token to token bond request with WBTC as col
   let requestManagerAddress = await bondManager.connect(addr).getRequestManagerAddress();
   let res = await(await WBTC.connect(addr).approve(tokenBank.target, amountA)).wait();
   res = await(await tokenBank.connect(addr).giveAddressAccessToToken(WBTCAddress, requestManagerAddress, amountA)).wait();
-  res = await(await bondManager.connect(addr).postTokenToTokenbondRequest(WBTCAddress, amountA, USDCAddress, 80, 168, 5)).wait();
+  res = await(await requestManager.connect(addr).postBondRequest(WBTCAddress, amountA, USDCAddress, 80, 168, 5)).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect(amountB <= amountA / BigInt(10)).to.equal(true);
@@ -266,7 +269,7 @@ it('should allow the user to post another token to token bond request with WBTC 
   let requestManagerAddress = await bondManager.connect(addr).getRequestManagerAddress();
   let res = await(await WBTC.connect(addr).approve(tokenBank.target, amountA)).wait();
   res = await(await tokenBank.connect(addr).giveAddressAccessToToken(WBTCAddress, requestManagerAddress, amountA)).wait();
-  res = await(await bondManager.connect(addr).postTokenToTokenbondRequest(WBTCAddress, amountA, USDCAddress, 80, 168, 5)).wait();
+  res = await(await requestManager.connect(addr).postBondRequest(WBTCAddress, amountA, USDCAddress, 80, 168, 5)).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect(amountB <= amountA / BigInt(10)).to.equal(true);
@@ -276,8 +279,8 @@ it('should allow another user to supply their USDC for the loan', async() => {
   let other;
   [, other] = await ethers.getSigners();
   
-  let res1 = await bondManager.getBondRequests();
-  let amountRequired = await bondManager.getRequiredAmountForRequest([...res1[1]]);
+  let res1 = await requestManager.getBondRequests();
+  let amountRequired = await requestManager.getRequiredAmountForRequest([...res1[1]]);
   let input = await testingHelper.getAmountIn(WETHAddress, USDCAddress, amountRequired);
   await(await testingHelper.connect(other).swapETHforToken(USDCAddress, {value: input})).wait();
   
@@ -285,7 +288,7 @@ it('should allow another user to supply their USDC for the loan', async() => {
   let bondContractsManagerAddress = await bondManager.getBondContractsManagerAddress();
   let res = await(await USDC.connect(other).approve(tokenBank.target, amountRequired)).wait();
   res = await(await tokenBank.connect(other).giveAddressAccessToToken(USDCAddress, bondContractsManagerAddress, amountRequired)).wait();
-  res = await(await bondManager.connect(other).lendToTokenBorrower([...res1[1]])).wait();
+  res = await(await bondContractsManager.connect(other).lendToBorrower([...res1[1]])).wait();
   let amountB = await testingHelper.connect(other).getTokenBalance(USDCAddress);
 
   TokenToTokenLent = (amountA - amountB);
@@ -295,10 +298,10 @@ it('should allow the user to cancel a token collatralized bond request', async()
   let addr;
   [addr] = await ethers.getSigners();
   
-  let res1 = await bondManager.getBondRequests();
+  let res1 = await requestManager.getBondRequests();
   
   let amountA = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
-  let res = await(await bondManager.connect(addr).cancelTokenCollatralizedBondRequest([...res1[0]])).wait();
+  let res = await(await requestManager.connect(addr).cancelBondRequest([...res1[0]])).wait();
   let amountB = await testingHelper.connect(addr).getTokenBalance(WBTCAddress);
   
   expect(amountB > amountA).to.equal(true);
@@ -312,9 +315,8 @@ it('should allow the token to token bond to liquidate', async () => {
   if (upkeepNeeded) {
     let res = await (await bondManager.connect(addr).performUpkeep(data)).wait();
   }
-  let NFTs = await bondManager.connect(other).getLendersIds();
-  await bondManager.connect(other).withdrawLentTokens(NFTs[0]);
+  let NFTs = await bondContractsManager.connect(other).getLendersIds();
+  await bondContractsManager.connect(other).withdraw(NFTs[0]);
   let amountB = await testingHelper.connect(other).getTokenBalance(USDCAddress);
   expect((amountB - amountA) >= TokenToTokenLent).to.equal(true);
 });
-

@@ -23,7 +23,8 @@ contract LenderNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
   }
 
   function getNextId() public returns (uint32) {
-    for(uint32 i; i < totalNFTs; i++) {
+    uint32 total = totalNFTs;
+    for(uint32 i; i < total; i++) {
       if(burned[i]) {
         return i;
       }
@@ -40,10 +41,11 @@ contract LenderNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
   }
 
   function getIds(address lender) public view returns (uint32[] memory res) {
-    uint32[] memory possibleIds = new uint32[](totalNFTs);
+    uint32 total = totalNFTs;
+    uint32[] memory possibleIds = new uint32[](total);
     uint32 index = 0;
 
-    for(uint32 i; i < totalNFTs; i++) {
+    for(uint32 i; i < total; i++) {
       if(ownerOf(i) == lender) {
         possibleIds[index] = i;
         index++;
@@ -73,10 +75,6 @@ contract Lender is Bond, ReentrancyGuard {
 
   receive() external payable {}
   
-  function test() public pure returns (string memory) {
-    return 'hello world';
-  }
-
   function liquidate(uint32 id) public nonReentrant {
     bondData memory data = getBondData(id);
     require(msg.sender == address(owner), 'you are not authorized to do this action');
@@ -138,29 +136,21 @@ contract Lender is Bond, ReentrancyGuard {
   }
   
   // these functions should be accessible by the nft holder but the selector cant be found for any of the functions in this contract so i have to route them through the bond contracts manager right now
-  function withdrawLentTokens(address lender, uint32 id) public {
+  function withdraw(address lender, uint32 id) public {
     require(msg.sender == address(owner), 'currently need to route this function through the bondContractsManager');    
     bondData memory data = getBondData(id);
     require(lender == lenderNFTManager.getOwner(id), 'you are not the lender');
     require(data.liquidated, 'this bond has not yet been liquidated');
 
-    IERC20 tokenContract = IERC20(data.borrowingToken);
-    bool status = tokenContract.transfer(lender, data.total);
-    require(status, "Withdraw failed");
-
-    BondContractsManager burn = BondContractsManager(owner);
-    burn.burnFromLender(id);
+    if(data.borrowingToken != address(1)) {
+      IERC20 tokenContract = IERC20(data.borrowingToken);
+      bool status = tokenContract.transfer(lender, data.total);
+      require(status, "Withdraw failed");
+    } else {
+      sendETHToLender(id, data.total);
     }
 
-
-  function withdrawLentETH(address lender, uint32 id) public {
-    require(msg.sender == address(owner), 'currently need to route this function through the bondContractsManager');
-    bondData memory data = getBondData(id);
-    require(lender == lenderNFTManager.getOwner(id), 'you are not the lender');
-    require(data.liquidated, 'this bond has not yet been liquidated');
-
     BondContractsManager burn = BondContractsManager(owner);
-    sendETHToLender(id, data.total);
     burn.burnFromLender(id);
   }
 }

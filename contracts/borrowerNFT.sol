@@ -17,7 +17,8 @@ contract BorrowerNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
   }
 
   function getNextId() public returns (uint32) {
-    for(uint32 i = 0; i < totalNFTs; i++) {
+    uint32 total = totalNFTs;
+    for(uint32 i = 0; i < total; i++) {
       if(burned[i]) {
         return i;
       }
@@ -34,10 +35,11 @@ contract BorrowerNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
   }
 
   function getIds(address borrower) public view returns (uint32[] memory res) {
-    uint32[] memory possibleIds = new uint32[](totalNFTs);
+    uint32 total = totalNFTs;
+    uint32[] memory possibleIds = new uint32[](total);
     uint index = 0;
 
-    for(uint32 i; i < totalNFTs; i++) {
+    for(uint32 i; i < total; i++) {
       if(ownerOf(i) == borrower) {
         possibleIds[index] = i;
         index++;
@@ -84,47 +86,35 @@ contract Borrower is Bond, HandlesETH {
     setBondData(id, data);
   }
 
-  function withdrawBorrowedTokens(uint32 id, uint amount) public {
+  function withdraw(uint32 id, uint amount) public {
     emit Withdraw(borrowerNFTManager.getOwner(id), amount);
     bondData memory data = getBondData(id);
     require(msg.sender == borrowerNFTManager.getOwner(id), 'you are not the borrower');
     data.borrowed += amount;
     setBondData(id, data);
-    require(data.borrowed <= data.borrowingAmount, 'not enough balance');  
-    IERC20 tokenContract = IERC20(data.borrowingToken);
-    bool status = tokenContract.transfer(borrowerNFTManager.getOwner(id), amount);
-    require(status, 'withdraw failed');
+    require(data.borrowed <= data.borrowingAmount, 'not enough balance');
+    if(data.borrowingToken != address(1)) {
+      IERC20 tokenContract = IERC20(data.borrowingToken);
+      bool status = tokenContract.transfer(borrowerNFTManager.getOwner(id), amount);
+      require(status, 'withdraw failed');
+    } else {
+      sendETHToBorrower(id, amount);
+    } 
   }
 
-  function withdrawBorrowedETH(uint32 id, uint amount) public {
-    emit Withdraw(borrowerNFTManager.getOwner(id), amount);
-    bondData memory data = getBondData(id);
-    require(msg.sender == borrowerNFTManager.getOwner(id), 'you are not the borrower');
-    data.borrowed += amount;
-    setBondData(id, data);
-    require(data.borrowed <= data.borrowingAmount, 'not enough balance'); 
-    sendETHToBorrower(id, amount); 
-  }
-
-  function depositBorrowedETH(uint32 id) public payable {
-    emit Deposit(msg.sender, borrowerNFTManager.getOwner(id), msg.value);
-    bondData memory data = getBondData(id);
-    // this can be called by anywone, for users with bots that want them to pay off debts.
-    require(msg.value <= data.borrowed, 'you are sending too much ETH');
-    data.borrowed -= msg.value;
-    setBondData(id, data); 
-  }
-
-  function depositBorrowedTokens(uint32 id, uint amount) public {
+  function deposit(uint32 id, uint amount) public payable {
     emit Deposit(msg.sender, borrowerNFTManager.getOwner(id), amount);
     bondData memory data = getBondData(id);
     // this can be called by anywone, for users with bots that want them to pay off debts.
+    if(data.borrowingToken == address(0)) require(msg.value == amount, 'amount must match sent ETH');
     require(amount <= data.borrowed, 'you are sending too much tokens');
     data.borrowed -= amount;
-    setBondData(id, data); 
-    IERC20 tokenContract = IERC20(data.borrowingToken);
-    require(tokenContract.allowance(msg.sender, address(this)) >= amount, 'allowance is not high enough');
-    bool status = tokenContract.transferFrom(msg.sender, address(this), amount);
-    require(status, 'deposit failed');
+    setBondData(id, data);
+    if(data.borrowingToken != address(1)) {
+      IERC20 tokenContract = IERC20(data.borrowingToken);
+      require(tokenContract.allowance(msg.sender, address(this)) >= amount, 'allowance is not high enough');
+      bool status = tokenContract.transferFrom(msg.sender, address(this), amount);
+      require(status, 'deposit failed');
+    }
   }
 }
