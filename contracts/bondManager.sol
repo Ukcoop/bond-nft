@@ -61,12 +61,12 @@ contract BondManager is AutomationCompatibleInterface {
   
   // slither-disable-start reentrancy-no-eth
   function performUpkeep(bytes calldata) external override {
+    BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract());
     uintPair[] memory bondPairs = bondContractsManager.getBondPairs();
     uint len = bondPairs.length;
     
     // slither-disable-start calls-loop
-    for(uint i; i < len; i++) {
-      BondInterface bondContractInstance = BondInterface(bondContractsManager.getAddressOfLenderContract());
+    for(uint i; i < len; i++) { 
       bool yes = testing || bondContractInstance.isUnderCollateralized() || bondContractInstance.hasMatured();
       if(yes) {
         bondContractsManager.liquidate(bondPairs[i].borrowerId, bondPairs[i].lenderId);

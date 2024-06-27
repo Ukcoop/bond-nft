@@ -12,11 +12,11 @@ contract BorrowerNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
   mapping(uint32 => bool) internal burned; 
   uint32 internal totalNFTs;
 
-  constructor(address _lenderNFTManager, address _priceOracleManager) ERC721("bond NFT borrower", "BNFTB") Ownable(msg.sender) {
-    borrowerContract = new Borrower(_lenderNFTManager, address(this), msg.sender, _priceOracleManager);
+  constructor(address _lenderNFTManager, address _priceOracleManager, address _testingHelper) ERC721("bond NFT borrower", "BNFTB") Ownable(msg.sender) {
+    borrowerContract = new Borrower(_lenderNFTManager, address(this), msg.sender, _priceOracleManager, _testingHelper);
   }
 
-  function getNextId() public returns (uint32) {
+  function getNextId() public onlyOwner returns (uint32) {
     uint32 total = totalNFTs;
     for(uint32 i = 0; i < total; i++) {
       if(burned[i]) {
@@ -65,7 +65,7 @@ contract BorrowerNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
 } 
 
 contract Borrower is Bond, HandlesETH {
-  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager) Bond(_lenderNFTManager, _borrowerNFTManager, _bondContractsManager, _priceOracleManager) {}
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager, address _testingHelper) Bond(_lenderNFTManager, _borrowerNFTManager, _bondContractsManager, _priceOracleManager, _testingHelper) {}
   
   receive() external payable {}
 
@@ -74,7 +74,7 @@ contract Borrower is Bond, HandlesETH {
 
   function liquidate(uint32 id, address lenderContract) public {
     bondData memory data = getBondData(id);
-    require(msg.sender == address(owner) || msg.sender == borrowerNFTManager.getOwner(id), 'you are not authorized to this action');
+    require(msg.sender == address(owner), 'you are not authorized to this action');
     data.liquidated = true;
     if(data.borrowingToken != address(1)) {
       IERC20 tokenContract = IERC20(data.borrowingToken);

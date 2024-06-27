@@ -23,10 +23,10 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
   address internal bondManagerAddress;
   address internal immutable deployer;
   
-  constructor(address _tokenBank, address _priceOracleManager, address _requestManager) {
+  constructor(address _tokenBank, address _priceOracleManager, address _testingHelper, address _requestManager) {
     lenderNFTManager = new LenderNFTManager();
-    borrowerNFTManager = new BorrowerNFTManager(address(lenderNFTManager), _priceOracleManager);
-    lenderNFTManager.setAddress(address(borrowerNFTManager), _priceOracleManager);
+    borrowerNFTManager = new BorrowerNFTManager(address(lenderNFTManager), _priceOracleManager, _testingHelper);
+    lenderNFTManager.setAddress(address(borrowerNFTManager), _priceOracleManager, _testingHelper);
     tokenBank = TokenBank(_tokenBank);
     requestManager = RequestManager(_requestManager);
     priceOracleManager = PriceOracleManager(_priceOracleManager);
@@ -67,6 +67,7 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
   }
 
   function setBondData(uint32 bondId, bondData memory data) public {
+    require(msg.sender == borrowerNFTManager.getContractAddress() || msg.sender == lenderNFTManager.getContractAddress(), 'you are not authorized to do this action');
     bondContractsData[bondId] = data;
   } 
 
@@ -102,7 +103,7 @@ contract BondContractsManager is HandlesETH, ReentrancyGuard {
     lenderCanBurn[lenderId] = true;
     Borrower borrower = Borrower(borrowerNFTManager.getContractAddress());
     Lender lender = Lender(lenderNFTManager.getContractAddress());
-    getDataResponse memory res = lender.getData(lenderId);
+    bondData memory res = lender.getData(lenderId);
     require(res.borrowerId == borrowerId, 'the lender does not have this address as the borrower');
     borrower.liquidate(borrowerId, address(lender));
     lender.liquidate(lenderId);

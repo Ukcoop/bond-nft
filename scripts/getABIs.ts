@@ -1,6 +1,5 @@
-const fs = require('fs');
-
 import constantABIs from '../constants/constantABIs';
+const fs = require('fs');
 
 async function writeJSON(path: string, data: Object) {
   await fs.writeFileSync(path, JSON.stringify(data));

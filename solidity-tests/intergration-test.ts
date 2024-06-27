@@ -33,18 +33,15 @@ it('should get the contract ABIs', async() => {
 
 it('should deploy bond mamager', async() => {
   tokenBank  = await ethers.deployContract('TokenBank');
+  testingHelper = await ethers.deployContract('TestingHelper');
   let priceOracleManager = await ethers.deployContract('PriceOracleManager');
   requestManager = await ethers.deployContract('RequestManager', [tokenBank.target, priceOracleManager.target]);
-  bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, requestManager.target]);
+  bondContractsManager = await ethers.deployContract('BondContractsManager', [tokenBank.target, priceOracleManager.target, testingHelper.target, requestManager.target]);
   bondManager = await ethers.deployContract('BondManager', [requestManager.target, bondContractsManager.target, tokenBank.target, true]);
   let addr;
   [addr] = await ethers.getSigners();
   await requestManager.connect(addr).setAddress(bondManager.target, bondContractsManager.target);
   await bondContractsManager.connect(addr).setAddress(bondManager.target);
-});
-
-it('should deploy testing helper', async() => {
-  testingHelper = await ethers.deployContract('TestingHelper');
 });
 
 it('should connect to the WBTC contract', async() => {

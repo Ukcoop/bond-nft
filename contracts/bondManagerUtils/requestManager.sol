@@ -64,7 +64,7 @@ contract RequestManager is HandlesETH {
   }
 
   function deleteBondRequest(uint index) public {
-    require(msg.sender == bondManagerAddress || msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
+    require(msg.sender == bondContractsManagerAddress, 'you are not authorized to do this action');
     _deleteBondRequest(index);
   }
 
@@ -105,8 +105,8 @@ contract RequestManager is HandlesETH {
     if(collatralToken != address(1)) require(isWhitelistedToken(collatralToken), 'this token is not whitelisted');
     if(borrowingToken != address(1)) require(isWhitelistedToken(borrowingToken), 'this token is not whitelisted');
     require(borrowingPercentage <= 80 && borrowingPercentage >= 20, 'borrowingPercentage is not in range: (20 to 80)%');
-    require(termInHours > 24, 'bond length is too short');
-    require(intrestYearly > 2 && intrestYearly < 15, 'intrest is not in this range: (2 to 15)%');
+    require(termInHours >= 24, 'bond length is too short');
+    require(intrestYearly >= 2 && intrestYearly <= 15, 'intrest is not in this range: (2 to 15)%');
 
     bondRequests.push(bondRequest(
       msg.sender,

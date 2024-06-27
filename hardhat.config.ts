@@ -26,6 +26,11 @@ const config: HardhatUserConfig = {
   },
   paths: {
     tests:'./solidity-tests'
+  },
+  gasReporter: {
+    darkMode: true,
+    reportFormat: 'markdown',
+    outputFile: 'documents/gasReporter.md'
   }
 };
 

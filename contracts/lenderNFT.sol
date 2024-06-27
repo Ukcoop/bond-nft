@@ -18,13 +18,13 @@ contract LenderNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
 
   constructor() ERC721("bond NFT lender", "BNFTL") Ownable(msg.sender) {}
 
-  function setAddress(address borrowerNFTManager, address priceOracleManager) public onlyOwner {
-    lenderContract = new Lender(address(this), borrowerNFTManager, msg.sender, priceOracleManager);
+  function setAddress(address borrowerNFTManager, address priceOracleManager, address testingHelper) public onlyOwner {
+    lenderContract = new Lender(address(this), borrowerNFTManager, msg.sender, priceOracleManager, testingHelper);
   }
 
-  function getNextId() public returns (uint32) {
+  function getNextId() public onlyOwner returns (uint32) {
     uint32 total = totalNFTs;
-    for(uint32 i; i < total; i++) {
+    for(uint32 i = 0; i < total; i++) {
       if(burned[i]) {
         return i;
       }
@@ -71,7 +71,7 @@ contract LenderNFTManager is ERC721Burnable, Ownable, NFTManagerInterface {
 }
 
 contract Lender is Bond, ReentrancyGuard {
-  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager) Bond(_lenderNFTManager, _borrowerNFTManager, _bondContractsManager, _priceOracleManager) {}
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager, address _testingHelper) Bond(_lenderNFTManager, _borrowerNFTManager, _bondContractsManager, _priceOracleManager, _testingHelper) {}
 
   receive() external payable {}
   
@@ -86,20 +86,20 @@ contract Lender is Bond, ReentrancyGuard {
     uint amountOwed = data.borrowed;
     IERC20 collatralTokenContract = IERC20(data.collatralToken);// when eth is the collatral, this will not be functional so it will not be used
     IERC20 borrowingTokenContract = IERC20(data.borrowingToken);// when eth is borrowed, this will not be functional so it will not be used
-    TestingHelper helper = new TestingHelper();
     data.total = getOwed(id);
     setBondData(id, data);
     if (data.collatralToken == address(1)) {
-      _handleEth(id, data, helper, amountOwed);
+      _handleEth(id, data, amountOwed);
     } else {
-      _handleToken(data, helper, amountOwed, collatralTokenContract, borrowingTokenContract);
+      _handleToken(data, amountOwed, collatralTokenContract, borrowingTokenContract);
     }
   }
 
-  function _handleEth(uint32 id, bondData memory data, TestingHelper helper, uint amountOwed) internal {
+  function _handleEth(uint32 id, bondData memory data, uint amountOwed) internal {
     uint spentAmount = address(this).balance;
     if(amountOwed != 0) {
       uint tmp = helper.getAmountIn(0x82aF49447D8a07e3bd95BD0d56f35241523fBab1, data.borrowingToken, amountOwed);
+      // slither-disable-next-line arbitrary-send-eth
       tmp = helper.swapETHforToken{value: tmp}(data.borrowingToken);
       require(tmp >= amountOwed, 'swap did not result in enough tokens');
     }
@@ -108,7 +108,7 @@ contract Lender is Bond, ReentrancyGuard {
     sendETHToBorrower(id, data.collatralAmount - spentAmount);
   }
 
-  function _handleToken(bondData memory data, TestingHelper helper, uint amountOwed, IERC20 collatralTokenContract, IERC20 borrowingTokenContract) internal {
+  function _handleToken(bondData memory data, uint amountOwed, IERC20 collatralTokenContract, IERC20 borrowingTokenContract) internal {
     uint spentAmount = collatralTokenContract.balanceOf(address(this));
     if(amountOwed != 0) {
       uint tmp = helper.getAmountIn(data.collatralToken, ((data.borrowingToken == address(1)) ? 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 : data.borrowingToken), amountOwed);
@@ -137,7 +137,7 @@ contract Lender is Bond, ReentrancyGuard {
   
   // these functions should be accessible by the nft holder but the selector cant be found for any of the functions in this contract so i have to route them through the bond contracts manager right now
   function withdraw(address lender, uint32 id) public {
-    require(msg.sender == address(owner), 'currently need to route this function through the bondContractsManager');    
+    require(msg.sender == address(owner), 'currently need to route this function through the bondContractsManager (very weird bug)');
     bondData memory data = getBondData(id);
     require(lender == lenderNFTManager.getOwner(id), 'you are not the lender');
     require(data.liquidated, 'this bond has not yet been liquidated');

@@ -3,17 +3,7 @@ pragma solidity ^0.8.20;
 
 import './priceOracleManager.sol';
 import './bondManagerUtils/bondContractsManager.sol';
-
-struct getDataResponse {
-  uint32 borrowerId;
-  uint32 lenderId;
-  address collatralToken;
-  address borrowingToken;
-  uint256 collatralAmount;
-  uint256 borrowingAmount;
-  uint32 durationInHours;
-  uint32 intrestYearly;
-}
+import './TestingHelper.sol';
 
 struct uintPair {
   uint32 borrowerId;
@@ -34,7 +24,7 @@ struct bondData {
   uint32 borrowerId;
   uint32 lenderId;
   uint32 durationInHours;
-  uint32 intrestYearly;
+  uint32 interestYearly;
   uint32 startTime;
   address owner;
   address collatralToken; // this will be address(1) for native eth
@@ -47,7 +37,7 @@ struct bondData {
 }
 
 interface BondInterface {
-  function getData() external view returns (getDataResponse memory);
+  function getData() external view returns (bondData memory);
   function getOwed() external view returns (uint);
   function hasMatured() external view returns (bool);
   function isUnderCollateralized() external view returns (bool);
@@ -78,13 +68,15 @@ contract Bond {
   PriceOracleManager internal immutable priceOracleManager;
   NFTManagerInterface internal immutable lenderNFTManager;
   NFTManagerInterface internal immutable borrowerNFTManager;
-  BondContractsManager immutable owner;  
+  BondContractsManager immutable owner;
+  TestingHelper immutable helper;
 
-  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager) {
+  constructor(address _lenderNFTManager, address _borrowerNFTManager, address _bondContractsManager, address _priceOracleManager, address _testingHelper) {
     lenderNFTManager = NFTManagerInterface(_lenderNFTManager);
     borrowerNFTManager = NFTManagerInterface(_borrowerNFTManager);
     priceOracleManager = PriceOracleManager(_priceOracleManager);
     owner = BondContractsManager(_bondContractsManager);
+    helper = TestingHelper(_testingHelper);
   }
 
   function setBondId(uint32 bondId, uint32 nftId) public {
@@ -100,25 +92,25 @@ contract Bond {
     owner.setBondData(toBondId[id], data);
   }
 
-  function getData(uint32 id) public view returns (getDataResponse memory) {
-    bondData memory data = getBondData(id);
-    return getDataResponse(data.borrowerId, data.lenderId, data.collatralToken, data.borrowingToken, data.collatralAmount, data.borrowingAmount, data.durationInHours, data.intrestYearly);
+  function getData(uint32 id) public view returns (bondData memory) {
+    return getBondData(id);
   }
   
   // slither-disable-start timestamp
   // slither-disable-start divide-before-multiply
   // slither-disable-start assembly
-  function getOwed(uint32 id) public view returns (uint owed) { // this might not be working correctly, need more resolution on the intrest.
+  function getOwed(uint32 id) public view returns (uint256 owed) {
     bondData memory data = getBondData(id);
-    uint start = data.startTime;
-    uint intrest = data.intrestYearly;
-    uint borrowing = data.borrowingAmount;
+    uint256 start = data.startTime;
+    uint32 interestYearly = data.interestYearly;
+    uint256 borrowing = data.borrowingAmount;
+
     assembly {
       let currentTime := timestamp()
-      let elapsedTime := div(sub(currentTime, start), 3600)
-      let interestRatePerHour := div(intrest, 8760)
-      let interestAccrued := div(mul(interestRatePerHour, elapsedTime), 100)
-      let totalOwed := mul(borrowing, add(1, interestAccrued))
+      let elapsedTime := sub(currentTime, start)
+      let interestRatePerSecond := div(mul(interestYearly, exp(10, 18)), mul(36525, 86400))
+      let interestAccrued := div(mul(interestRatePerSecond, elapsedTime), exp(10, 20))
+      let totalOwed := add(borrowing, mul(borrowing, interestAccrued))
       owed := totalOwed
     }
   }

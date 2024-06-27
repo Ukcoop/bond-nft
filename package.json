@@ -8,12 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "test": "npx hardhat test --network localhost && vitest --run",
+    "deploy-dev": "npx hardhat run scripts/deploy-dev.ts --network localhost",
     "audit": "slither . --exclude solc-version,pragma --filter-paths node_modules",
     "get-abis": "npx hardhat run scripts/getABIs.ts"
   },
   "dependencies": {
     "@chainlink/contracts": "^1.1.1",
     "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
     "ethers": "^6.12.2",
     "next": "14.2.3",
     "react": "^18",
