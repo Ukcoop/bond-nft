@@ -26,7 +26,7 @@ jobs:
           
       - name: Run Slither
         run: |
-          slither . > documents/slither_report.md
+          slither . --checklist --filter-paths node_modules > documents/slither_report.md
 
       - name: Commit Slither Report
         run: |
